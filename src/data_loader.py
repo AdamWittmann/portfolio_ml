@@ -30,6 +30,11 @@ def load_cached_data(ticker):
 def fetch_new_data(ticker, start_date):
     df = yf.download(ticker, start=start_date)
     df.reset_index(inplace=True)
+    
+    # Flatten MultiIndex columns properly
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [col[0] for col in df.columns]
+    
     return df
 
 def update_data(ticker):
