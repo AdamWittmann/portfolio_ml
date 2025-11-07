@@ -14,6 +14,41 @@ from sqlalchemy import create_engine
 
 engine = create_engine("postgresql://adam_ml:Woodruff5614!@localhost:5432/portfolio_ml")
 
+from sqlalchemy import text
+
+def insert_new_only(df: pd.DataFrame, ticker: str):
+    # We assume df already has correct columns + types
+    if df.empty:
+        print(f"ℹ️ No data to insert for {ticker}.")
+        return
+
+    # Normalize date to date (no time)
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["date"]).dt.date
+
+    # Fetch existing dates for this symbol
+    with engine.begin() as conn:
+        existing = pd.read_sql(
+            text("SELECT date FROM prices WHERE symbol = :s"),
+            conn,
+            params={"s": ticker}
+        )
+
+    if not existing.empty:
+        existing_dates = set(existing["date"])
+        before = len(df)
+        df = df[~df["date"].isin(existing_dates)]
+        print(f"🔎 {ticker}: {before - len(df)} rows skipped (already in DB).")
+
+    if df.empty:
+        print(f"ℹ️ No new rows to insert for {ticker}.")
+        return
+
+    # Insert only new rows
+    with engine.begin() as conn:
+        df.to_sql("prices", conn, if_exists="append", index=False, method="multi")
+    print(f"✅ Inserted {len(df)} new rows for {ticker}.")
+
 def push_to_db(df: pd.DataFrame, ticker: str):
     """
     Push an in-memory, feature-enriched DataFrame to Postgres.
@@ -50,9 +85,7 @@ def push_to_db(df: pd.DataFrame, ticker: str):
     print(f"📤 Pushing {ticker}: {len(df)} rows, {len(cols)} cols -> prices")
 
     # Atomic bulk insert
-    with engine.begin() as conn:
-        df.to_sql("prices", conn, if_exists="append", index=False, method="multi")
-
+    insert_new_only(df,ticker)
     print(f"✅ Inserted {len(df)} rows for {ticker}.")
 
 
