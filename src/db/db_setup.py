@@ -2,9 +2,11 @@
 import sqlalchemy as sa
 from sqlalchemy import create_engine,text
 from schemas.prices import metadata
-
+import os
+from dotenv import load_dotenv
+load_dotenv()
 #Connect to the database
-engine = create_engine("postgresql://adam_ml:Woodruff5614!@localhost:5432/portfolio_ml")
+engine = create_engine(os.getenv("DATABASE_URL"))
 with engine.connect() as conn:
     print("Connected!", conn)
     print(conn.execute(text("SELECT current_database();")).scalar())

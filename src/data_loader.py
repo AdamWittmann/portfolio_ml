@@ -3,7 +3,8 @@ import os
 import pandas as pd
 import datetime as dt
 import logging
-
+from dotenv import load_dotenv
+load_dotenv()
 logging.basicConfig(
     filename='data_loader.log',
     level=logging.INFO,
@@ -12,7 +13,7 @@ logging.basicConfig(
 
 from sqlalchemy import create_engine
 
-engine = create_engine("postgresql://adam_ml:Woodruff5614!@localhost:5432/portfolio_ml")
+engine = create_engine(os.getenv("DATABASE_URL"))
 
 from sqlalchemy import text
 
