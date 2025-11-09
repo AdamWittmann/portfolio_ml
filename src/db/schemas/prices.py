@@ -18,5 +18,12 @@ prices = Table(
     Column("sma_200", Float),
     Column("daily_return", Float),
     Column("volatility", Float),
-    Column("drawdown", Float)
+    Column("drawdown", Float),
+    Column("rsi", Float),
+    Column("macd", Float),
+    Column("macd_signal", Float),
+    Column("bb_upper", Float),
+    Column("bb_lower", Float),
+    Column("bb_width", Float),
+    Column("sentiment_score", Float),
 )
