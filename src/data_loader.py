@@ -4,6 +4,7 @@ import pandas as pd
 import datetime as dt
 import logging
 from dotenv import load_dotenv
+from sentiment_analyzer import get_sentiment_score
 load_dotenv()
 logging.basicConfig(
     filename='data_loader.log',
@@ -71,15 +72,19 @@ def push_to_db(df: pd.DataFrame, ticker: str):
         "High": "high",
         "Low":  "low",
         "Close":"close",
-        "Volume":"Volume",
+        "Volume":"volume",
     }
     df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
 
     # Keep only columns the table has (safe subset)
     expected_cols = [
-        "symbol","date","open","high","low","close","Volume",
-        "sma_20","sma_50","sma_200","daily_return","volatility","drawdown"
+        "symbol", "date", "open", "high", "low", "close", "Volume",
+        "sma_20", "sma_50", "sma_200", "daily_return", "volatility", "drawdown",
+        "rsi", "macd", "macd_signal", "bb_upper", "bb_lower", "bb_width",
+        "sentiment_score" 
     ]
+    cols = [c for c in expected_cols if c in df.columns]
+    df = df[cols]
     cols = [c for c in expected_cols if c in df.columns]
     df = df[cols]
 
@@ -91,7 +96,22 @@ def push_to_db(df: pd.DataFrame, ticker: str):
 
 
 CACHE_DIR = "data_cache"
-TICKERS = ["AAPL","MTB","NVDA","TSLA","META","MSFT"]
+TICKERS = [
+    # Tech (5)
+    "AAPL", "NVDA", "MSFT", "META", "NFLX",
+    
+    # Finance (3)
+    "MTB", "JPM", "BAC",
+    
+    # Consumer (3)
+    "HD", "TSLA", "COST",
+    
+    # Telecom (2)
+    "CSCO", "T",
+    
+    # Index/Benchmark (2)
+    "SPY", "VOO"
+]
 
 #Cache Directoy for stock data, inital step before connecting to db
 def ensure_cache_dir():
@@ -128,9 +148,32 @@ def compute_features(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
     df["volatility"] = df["daily_return"].rolling(window=20).std()
     df["cummax"] = df["Close"].cummax()
     df["drawdown"] = (df["Close"] - df["cummax"]) / df["cummax"]
+        # RSI (14-day) - FROM EDA
+    delta = df["Close"].diff()
+    gain = delta.where(delta > 0, 0).rolling(window=14).mean()
+    loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
+    rs = gain / loss
+    df["rsi"] = 100 - (100 / (1 + rs))
+    
+    # MACD - FROM EDA
+    ema_12 = df["Close"].ewm(span=12, adjust=False).mean()
+    ema_26 = df["Close"].ewm(span=26, adjust=False).mean()
+    df["macd"] = ema_12 - ema_26
+    df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
+    
+    # Bollinger Bands - FROM EDA
+    df["bb_middle"] = df["Close"].rolling(window=20).mean()
+    bb_std = df["Close"].rolling(window=20).std()
+    df["bb_upper"] = df["bb_middle"] + (2 * bb_std)
+    df["bb_lower"] = df["bb_middle"] - (2 * bb_std)
+    df["bb_width"] = (df["bb_upper"] - df["bb_lower"]) / df["bb_middle"]
+    
+    # Clean up
     df.drop(columns=["cummax"], inplace=True)
     df.dropna(inplace=True)
+    
     return df
+
 
 def update_data(ticker):
     print(f"Updating {ticker}...")
@@ -160,10 +203,14 @@ def update_data(ticker):
             # Compute features
             combined = compute_features(combined, ticker)
 
+            print(f"Fetching sentiment for {ticker}...")
+            sentiment = get_sentiment_score(ticker)
+            combined["sentiment_score"] = sentiment
+            print(f"✓ Sentiment: {sentiment:.3f}")
+            
             # Save to cache
             combined.to_csv(get_cached_path(ticker), index=False)
-            logging.info(f"Updated {ticker} with {len(new_data)} new rows.")
-
+            logging.info(f"Updated {ticker} with {len(new_data)} new rows, sentiment: {sentiment:.3f}")
             # ✅ Return for DB push
             return combined
         else:  # Now this else matches the if above
