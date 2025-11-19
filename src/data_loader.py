@@ -4,7 +4,7 @@ import pandas as pd
 import datetime as dt
 import logging
 from dotenv import load_dotenv
-from sentiment_analyzer import get_sentiment_score
+
 load_dotenv()
 logging.basicConfig(
     filename='data_loader.log',
@@ -80,18 +80,15 @@ def push_to_db(df: pd.DataFrame, ticker: str):
     expected_cols = [
         "symbol", "date", "open", "high", "low", "close", "Volume",
         "sma_20", "sma_50", "sma_200", "daily_return", "volatility", "drawdown",
-        "rsi", "macd", "macd_signal", "bb_upper", "bb_lower", "bb_width",
-        "sentiment_score" 
+        "rsi", "macd", "macd_signal", "bb_upper", "bb_lower", "bb_width"
     ]
-    cols = [c for c in expected_cols if c in df.columns]
-    df = df[cols]
     cols = [c for c in expected_cols if c in df.columns]
     df = df[cols]
 
     print(f"📤 Pushing {ticker}: {len(df)} rows, {len(cols)} cols -> prices")
 
     # Atomic bulk insert
-    insert_new_only(df,ticker)
+    insert_new_only(df, ticker)
     print(f"✅ Inserted {len(df)} rows for {ticker}.")
 
 
@@ -116,6 +113,7 @@ TICKERS = [
 #Cache Directoy for stock data, inital step before connecting to db
 def ensure_cache_dir():
     os.makedirs(CACHE_DIR, exist_ok=True)
+
 def get_cached_path(ticker):
     return os.path.join(CACHE_DIR, f"{ticker}.csv")
 
@@ -148,20 +146,21 @@ def compute_features(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
     df["volatility"] = df["daily_return"].rolling(window=20).std()
     df["cummax"] = df["Close"].cummax()
     df["drawdown"] = (df["Close"] - df["cummax"]) / df["cummax"]
-        # RSI (14-day) - FROM EDA
+    
+    # RSI (14-day)
     delta = df["Close"].diff()
     gain = delta.where(delta > 0, 0).rolling(window=14).mean()
     loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
     rs = gain / loss
     df["rsi"] = 100 - (100 / (1 + rs))
     
-    # MACD - FROM EDA
+    # MACD
     ema_12 = df["Close"].ewm(span=12, adjust=False).mean()
     ema_26 = df["Close"].ewm(span=26, adjust=False).mean()
     df["macd"] = ema_12 - ema_26
     df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
     
-    # Bollinger Bands - FROM EDA
+    # Bollinger Bands
     df["bb_middle"] = df["Close"].rolling(window=20).mean()
     bb_std = df["Close"].rolling(window=20).std()
     df["bb_upper"] = df["bb_middle"] + (2 * bb_std)
@@ -184,17 +183,17 @@ def update_data(ticker):
         last_date = cached_df["Date"].max()
         start_date = last_date + pd.Timedelta(days=1)
     else:
-        start_date = dt.datetime(2020,1,1)
+        start_date = dt.datetime(2020, 1, 1)
+    
     #Dont redownload check if start date is > today dt.date.date()/today()
     if start_date.date() > dt.datetime.today().date():
         print(f"{ticker} is up to date.")
         return cached_df
-    #return if up to date
 
     #try download as newdata
     try:
         new_data = fetch_new_data(ticker, start_date)
-        if not new_data.empty:  # Add this check back
+        if not new_data.empty:
             combined = (
                 new_data if cached_df.empty
                 else pd.concat([cached_df, new_data]).drop_duplicates(subset=["Date"])
@@ -202,23 +201,20 @@ def update_data(ticker):
 
             # Compute features
             combined = compute_features(combined, ticker)
-
-            print(f"Fetching sentiment for {ticker}...")
-            sentiment = get_sentiment_score(ticker)
-            combined["sentiment_score"] = sentiment
-            print(f"✓ Sentiment: {sentiment:.3f}")
             
             # Save to cache
             combined.to_csv(get_cached_path(ticker), index=False)
-            logging.info(f"Updated {ticker} with {len(new_data)} new rows, sentiment: {sentiment:.3f}")
+            logging.info(f"Updated {ticker} with {len(new_data)} new rows")
+            
             # ✅ Return for DB push
             return combined
-        else:  # Now this else matches the if above
+        else:
             logging.warning(f"No new data found for {ticker}.")
             return pd.DataFrame()
     except Exception as e:
         logging.error(f"Failed to update {ticker}: {e}")
         return pd.DataFrame()
+
 def main():
     ensure_cache_dir()
     for ticker in TICKERS:

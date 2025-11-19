@@ -12,7 +12,7 @@ prices = Table(
     Column("high", Float),
     Column("low", Float),
     Column("close", Float),
-    Column("Volume", Float),
+    Column("volume", Float),
     Column("sma_20", Float),
     Column("sma_50", Float),
     Column("sma_200", Float),
