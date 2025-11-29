@@ -11,7 +11,7 @@ from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, 
     f1_score, roc_auc_score, confusion_matrix, classification_report
 )
-from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
+from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit, GridSearchCV
 from scipy.stats import randint, uniform
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -109,76 +109,163 @@ def split_data_by_time(df: pd.DataFrame, train_end_date: str, test_start_date: s
     return X_train, X_test, y_train, y_test, test_metadata
 
 
-def train_xgboost_randomized_search(X_train, y_train, X_test, y_test, n_iter=30):
+# def train_xgboost_randomized_search(X_train, y_train, X_test, y_test, n_iter=30):
+#     """
+#     Train XGBoost with RandomizedSearchCV and TimeSeriesSplit cross-validation.
+#     Optimized parameter space for stock prediction.
+#     """
+#     # Calculate class weight
+#     n_neg = (y_train == 0).sum()
+#     n_pos = (y_train == 1).sum()
+#     scale_pos_weight = n_neg / n_pos
+    
+#     logger.info(f"\n🎯 Class weight (scale_pos_weight): {scale_pos_weight:.2f}")
+    
+#     # Parameter distributions - original ranges that worked
+#     param_distributions = {
+#         'n_estimators': randint(100, 300),
+#         'max_depth': randint(3, 8),
+#         'learning_rate': uniform(0.01, 0.2),
+#         'min_child_weight': randint(3, 25),
+#         'gamma': uniform(0, 0.5),
+#         'subsample': uniform(0.6, 0.4),
+#         'colsample_bytree': uniform(0.6, 0.4),
+#         'reg_alpha': uniform(0, 1.0),
+#         'reg_lambda': uniform(0.5, 2.0),
+#     }
+    
+#     # Base model
+#     base_model = XGBClassifier(
+#         scale_pos_weight=scale_pos_weight,
+#         random_state=42,
+#         tree_method='hist',
+#         eval_metric='logloss'
+#     )
+    
+#     # TimeSeriesSplit for proper temporal validation
+#     tscv = TimeSeriesSplit(n_splits=3)
+    
+#     # RandomizedSearchCV
+#     logger.info(f"\n🚀 Starting RandomizedSearchCV: {n_iter} iterations × 3 CV folds = {n_iter * 3} total fits")
+    
+#     search = RandomizedSearchCV(
+#         estimator=base_model,
+#         param_distributions=param_distributions,
+#         n_iter=n_iter,
+#         cv=tscv,
+#         scoring='roc_auc',
+#         n_jobs=1,  # GPU training must be sequential
+#         verbose=0,  # Silent mode
+#         random_state=42,
+#         return_train_score=True
+#     )
+    
+#     search.fit(X_train, y_train)
+    
+#     logger.info(f"\n✅ Search complete!")
+#     logger.info(f"🏆 Best CV ROC-AUC: {search.best_score_:.4f}")
+#     logger.info(f"🏆 Best parameters:")
+#     for param, value in search.best_params_.items():
+#         logger.info(f"   {param}: {value}")
+    
+#     # Show top 5 parameter combinations
+#     results_df = pd.DataFrame(search.cv_results_)
+#     results_df = results_df.sort_values('rank_test_score')
+    
+#     logger.info(f"\n📊 Top 5 parameter combinations:")
+#     for idx in range(min(5, len(results_df))):
+#         row = results_df.iloc[idx]
+#         logger.info(f"   Rank {idx+1}: CV Score = {row['mean_test_score']:.4f} (±{row['std_test_score']:.4f})")
+    
+#     return search.best_estimator_, search.best_params_, search.cv_results_
+
+def train_xgboost_grid_search(
+    X_train, y_train, X_test, y_test,
+    param_grid=None,
+    cv_splits=3
+    ):
     """
-    Train XGBoost with RandomizedSearchCV and TimeSeriesSplit cross-validation.
-    Optimized parameter space for stock prediction.
+    Train an XGBoost model using GridSearchCV with TimeSeriesSplit.
+    Provides a clean template for experimentation.
     """
-    # Calculate class weight
+
+    # ---------------------------------------------------------
+    # 1) Class Weight (optional but useful for imbalance)
+    # ---------------------------------------------------------
     n_neg = (y_train == 0).sum()
     n_pos = (y_train == 1).sum()
-    scale_pos_weight = n_neg / n_pos
-    
-    logger.info(f"\n🎯 Class weight (scale_pos_weight): {scale_pos_weight:.2f}")
-    
-    # Parameter distributions - original ranges that worked
-    param_distributions = {
-        'n_estimators': randint(100, 300),
-        'max_depth': randint(3, 8),
-        'learning_rate': uniform(0.01, 0.2),
-        'min_child_weight': randint(3, 25),
-        'gamma': uniform(0, 0.5),
-        'subsample': uniform(0.6, 0.4),
-        'colsample_bytree': uniform(0.6, 0.4),
-        'reg_alpha': uniform(0, 1.0),
-        'reg_lambda': uniform(0.5, 2.0),
-    }
-    
-    # Base model
-    base_model = XGBClassifier(
-        scale_pos_weight=scale_pos_weight,
-        random_state=42,
-        tree_method='hist',
-        eval_metric='logloss'
-    )
-    
-    # TimeSeriesSplit for proper temporal validation
-    tscv = TimeSeriesSplit(n_splits=3)
-    
-    # RandomizedSearchCV
-    logger.info(f"\n🚀 Starting RandomizedSearchCV: {n_iter} iterations × 3 CV folds = {n_iter * 3} total fits")
-    
-    search = RandomizedSearchCV(
-        estimator=base_model,
-        param_distributions=param_distributions,
-        n_iter=n_iter,
-        cv=tscv,
-        scoring='roc_auc',
-        n_jobs=1,  # GPU training must be sequential
-        verbose=0,  # Silent mode
-        random_state=42,
-        return_train_score=True
-    )
-    
-    search.fit(X_train, y_train)
-    
-    logger.info(f"\n✅ Search complete!")
-    logger.info(f"🏆 Best CV ROC-AUC: {search.best_score_:.4f}")
-    logger.info(f"🏆 Best parameters:")
-    for param, value in search.best_params_.items():
-        logger.info(f"   {param}: {value}")
-    
-    # Show top 5 parameter combinations
-    results_df = pd.DataFrame(search.cv_results_)
-    results_df = results_df.sort_values('rank_test_score')
-    
-    logger.info(f"\n📊 Top 5 parameter combinations:")
-    for idx in range(min(5, len(results_df))):
-        row = results_df.iloc[idx]
-        logger.info(f"   Rank {idx+1}: CV Score = {row['mean_test_score']:.4f} (±{row['std_test_score']:.4f})")
-    
-    return search.best_estimator_, search.best_params_, search.cv_results_
+    scale_pos_weight = n_neg / max(n_pos, 1)
 
+    print(f"\n🎯 Class weight (scale_pos_weight): {scale_pos_weight:.2f}")
+
+    # ---------------------------------------------------------
+    # 2) Default Parameter Grid (modify freely)
+    # ---------------------------------------------------------
+    if param_grid is None:
+        param_grid = {
+            "n_estimators": [100, 150, 200],
+            "max_depth": [3, 4, 5],
+            "learning_rate": [0.01, 0.05, 0.1],
+            "min_child_weight": [1, 5, 10],
+            "gamma": [0, 0.1, 0.2],
+            "subsample": [0.6, 0.8, 1.0],
+            "colsample_bytree": [0.6, 0.8, 1.0],
+            "reg_alpha": [0, 0.1, 0.5],
+            "reg_lambda": [1, 1.5, 2],
+        }
+
+    # ---------------------------------------------------------
+    # 3) Base Model
+    # ---------------------------------------------------------
+    base_model = XGBClassifier(
+        random_state=42,
+        tree_method="hist",
+        eval_metric="logloss",
+        scale_pos_weight=scale_pos_weight
+    )
+
+    # ---------------------------------------------------------
+    # 4) TimeSeries CV
+    # ---------------------------------------------------------
+    tscv = TimeSeriesSplit(n_splits=cv_splits)
+    total_fits = (
+        np.prod([len(v) for v in param_grid.values()]) * cv_splits
+    )
+
+    print(f"\n🚀 Starting GridSearchCV: ~{total_fits} total fits")
+
+    # ---------------------------------------------------------
+    # 5) GridSearchCV
+    # ---------------------------------------------------------
+    search = GridSearchCV(
+        estimator=base_model,
+        param_grid=param_grid,
+        scoring="roc_auc",
+        cv=tscv,
+        n_jobs=1,   # sequential = GPU-safe
+        verbose=1,
+        return_train_score=True,
+    )
+
+    search.fit(X_train, y_train)
+
+    # ---------------------------------------------------------
+    # 6) Results Summary
+    # ---------------------------------------------------------
+    print("\n✅ GridSearch Complete!")
+    print(f"🏆 Best CV ROC-AUC: {search.best_score_:.4f}")
+    print(f"🏆 Best Parameters:\n{search.best_params_}")
+
+    # Top results
+    results_df = pd.DataFrame(search.cv_results_)
+    results_df = results_df.sort_values("rank_test_score")
+
+    print("\n📊 Top Parameter Combinations:")
+    print(results_df[
+        ["rank_test_score", "mean_test_score", "std_test_score", "params"]
+    ].head())
+
+    return search.best_estimator_, search.best_params_, search.cv_results_
 
 def evaluate_model(model, X_test, y_test):
     """
@@ -313,9 +400,8 @@ def main():
     )
     
     # 4. Train model with RandomizedSearchCV
-    model, best_params, cv_results = train_xgboost_randomized_search(
+    model, best_params, cv_results = train_xgboost_grid_search(
         X_train, y_train, X_test, y_test, 
-        n_iter=40  # More iterations to find better params
     )
     
     # 5. Evaluate
