@@ -1,4 +1,4 @@
-# model_pipeline.py - ENHANCED VERSION
+# model_pipeline.py - OPTIMIZED VERSION
 
 import pandas as pd
 import numpy as np
@@ -11,39 +11,48 @@ from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, 
     f1_score, roc_auc_score, confusion_matrix, classification_report
 )
+from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
+from scipy.stats import randint, uniform
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # your 6650M (adjust 0 or 1)
+
+import torch
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(f"Using: {torch.cuda.get_device_name(0)}")
 
 engine = create_engine(os.getenv("DATABASE_URL"))
 
-def create_binary_target(df: pd.DataFrame, threshold: float = 0.03, days_ahead: int = 5) -> pd.DataFrame:
+
+def create_binary_target(df: pd.DataFrame, threshold: float = 0.03, days_ahead: int = 7) -> pd.DataFrame:
     """
     Create binary target variable: will the stock exceed threshold return in N days?
     
     Args:
         df: DataFrame with columns ['date', 'symbol', 'close', ...]
         threshold: Minimum return to classify as 'buy' (default 3%)
-        days_ahead: Lookahead window in days (default 5)
+        days_ahead: Lookahead window in days (default 7 for 1 week)
         
     Returns:
         DataFrame with 'target' and 'future_return' columns added
     """
     df = df.sort_values(['symbol', 'date']).copy()
     
-    df['future_return'] = df.groupby('symbol')['close'].pct_change(periods=days_ahead).shift(-days_ahead)
+    df['future_close'] = df.groupby('symbol')['close'].shift(-days_ahead)
+    df['future_return'] = (df['future_close'] - df['close']) / df['close']
     df['target'] = (df['future_return'] > threshold).astype(int)
     
     rows_before = len(df)
-    df = df.dropna(subset=['future_return'])
+    df = df.dropna(subset=['future_return', 'future_close'])
     rows_after = len(df)
     
     logger.info(f"Dropped {rows_before - rows_after} rows (last {days_ahead} days per ticker)")
     logger.info(f"\nTarget distribution:\n{df['target'].value_counts()}")
-    logger.info(f"\nBuy rate: {df['target'].mean():.2%}")
+    logger.info(f"Buy rate: {df['target'].mean():.2%}")
     
     return df
 
@@ -53,16 +62,14 @@ def prepare_features(df: pd.DataFrame):
     Prepare feature matrix X and target vector y.
     Drops non-feature columns.
     """
-    # Columns to exclude from features
-    exclude_cols = ['id', 'symbol', 'date', 'target', 'future_return']
+    exclude_cols = ['id', 'symbol', 'date', 'target', 'future_return', 'future_close']
     
     feature_cols = [col for col in df.columns if col not in exclude_cols]
     
     X = df[feature_cols]
     y = df['target']
     
-    # Keep metadata for analysis
-    metadata = df[['symbol', 'date', 'target']]
+    metadata = df[['symbol', 'date', 'target', 'future_return']].copy()
     
     logger.info(f"\nFeatures: {len(feature_cols)} columns")
     logger.info(f"Feature names: {feature_cols}")
@@ -83,7 +90,6 @@ def split_data_by_time(df: pd.DataFrame, train_end_date: str, test_start_date: s
     Returns:
         X_train, X_test, y_train, y_test, test_metadata
     """
-    # Convert string dates to datetime for comparison
     train_end = pd.to_datetime(train_end_date).date()
     test_start = pd.to_datetime(test_start_date).date()
     
@@ -102,9 +108,11 @@ def split_data_by_time(df: pd.DataFrame, train_end_date: str, test_start_date: s
     
     return X_train, X_test, y_train, y_test, test_metadata
 
-def train_xgboost(X_train, y_train, X_test, y_test):
+
+def train_xgboost_randomized_search(X_train, y_train, X_test, y_test, n_iter=30):
     """
-    Train XGBoost classifier with class weighting for imbalanced data.
+    Train XGBoost with RandomizedSearchCV and TimeSeriesSplit cross-validation.
+    Optimized parameter space for stock prediction.
     """
     # Calculate class weight
     n_neg = (y_train == 0).sum()
@@ -113,28 +121,63 @@ def train_xgboost(X_train, y_train, X_test, y_test):
     
     logger.info(f"\n🎯 Class weight (scale_pos_weight): {scale_pos_weight:.2f}")
     
-    model = XGBClassifier(
-        n_estimators=100,
-        max_depth=5,
-        learning_rate=0.1,
-        subsample=0.8,
-        colsample_bytree=0.8,
+    # Parameter distributions - original ranges that worked
+    param_distributions = {
+        'n_estimators': randint(100, 300),
+        'max_depth': randint(3, 8),
+        'learning_rate': uniform(0.01, 0.2),
+        'min_child_weight': randint(3, 25),
+        'gamma': uniform(0, 0.5),
+        'subsample': uniform(0.6, 0.4),
+        'colsample_bytree': uniform(0.6, 0.4),
+        'reg_alpha': uniform(0, 1.0),
+        'reg_lambda': uniform(0.5, 2.0),
+    }
+    
+    # Base model
+    base_model = XGBClassifier(
         scale_pos_weight=scale_pos_weight,
         random_state=42,
-        early_stopping_rounds=10,  # Moved here from fit()
+        tree_method='hist',
         eval_metric='logloss'
     )
     
-    logger.info("\n🚀 Training XGBoost model...")
-    model.fit(
-        X_train, y_train,
-        eval_set=[(X_test, y_test)],
-        verbose=False
+    # TimeSeriesSplit for proper temporal validation
+    tscv = TimeSeriesSplit(n_splits=3)
+    
+    # RandomizedSearchCV
+    logger.info(f"\n🚀 Starting RandomizedSearchCV: {n_iter} iterations × 3 CV folds = {n_iter * 3} total fits")
+    
+    search = RandomizedSearchCV(
+        estimator=base_model,
+        param_distributions=param_distributions,
+        n_iter=n_iter,
+        cv=tscv,
+        scoring='roc_auc',
+        n_jobs=1,  # GPU training must be sequential
+        verbose=0,  # Silent mode
+        random_state=42,
+        return_train_score=True
     )
     
-    logger.info("✅ Training complete!")
+    search.fit(X_train, y_train)
     
-    return model
+    logger.info(f"\n✅ Search complete!")
+    logger.info(f"🏆 Best CV ROC-AUC: {search.best_score_:.4f}")
+    logger.info(f"🏆 Best parameters:")
+    for param, value in search.best_params_.items():
+        logger.info(f"   {param}: {value}")
+    
+    # Show top 5 parameter combinations
+    results_df = pd.DataFrame(search.cv_results_)
+    results_df = results_df.sort_values('rank_test_score')
+    
+    logger.info(f"\n📊 Top 5 parameter combinations:")
+    for idx in range(min(5, len(results_df))):
+        row = results_df.iloc[idx]
+        logger.info(f"   Rank {idx+1}: CV Score = {row['mean_test_score']:.4f} (±{row['std_test_score']:.4f})")
+    
+    return search.best_estimator_, search.best_params_, search.cv_results_
 
 
 def evaluate_model(model, X_test, y_test):
@@ -168,9 +211,48 @@ def evaluate_model(model, X_test, y_test):
     logger.info(f"Actual: Yes   |    {cm[1,0]:6d}     |    {cm[1,1]:6d}")
     
     # Classification report
-    logger.info(f"\n{classification_report(y_test, y_pred, target_names=['Dont Buy', 'Buy'])}")
+    logger.info(f"\n{classification_report(y_test, y_pred, target_names=["Don't Buy", 'Buy'])}")
     
     return metrics, y_pred, y_pred_proba
+
+
+def evaluate_trading_performance(test_metadata, y_pred_proba, threshold=0.5):
+    """
+    Evaluate model as a trading strategy.
+    """
+    test_metadata = test_metadata.copy()
+    test_metadata['pred_proba'] = y_pred_proba
+    test_metadata['signal'] = (y_pred_proba >= threshold).astype(int)
+    
+    trades = test_metadata[test_metadata['signal'] == 1].copy()
+    
+    if len(trades) == 0:
+        logger.warning(f"⚠️  No trades generated at threshold {threshold}!")
+        return None
+    
+    n_trades = len(trades)
+    n_winners = (trades['future_return'] > 0.03).sum()
+    win_rate = n_winners / n_trades
+    
+    avg_return = trades['future_return'].mean()
+    median_return = trades['future_return'].median()
+    std_return = trades['future_return'].std()
+    
+    sharpe = (avg_return / std_return * np.sqrt(52)) if std_return > 0 else 0
+    
+    logger.info(f"\n💰 TRADING PERFORMANCE (threshold={threshold})")
+    logger.info(f"   Total signals: {n_trades}")
+    logger.info(f"   Winners: {n_winners} ({win_rate:.2%})")
+    logger.info(f"   Average return: {avg_return:.2%}")
+    logger.info(f"   Median return: {median_return:.2%}")
+    logger.info(f"   Sharpe ratio: {sharpe:.2f}")
+    
+    return {
+        'n_trades': n_trades,
+        'win_rate': win_rate,
+        'avg_return': avg_return,
+        'sharpe_ratio': sharpe
+    }
 
 
 def plot_feature_importance(model, feature_names, top_n=15, save_path='feature_importance.png'):
@@ -207,10 +289,10 @@ def save_model(model, filepath='models/stock_classifier.json'):
 
 def main():
     """
-    Full training pipeline.
+    Full training pipeline with RandomizedSearchCV optimization.
     """
     logger.info("="*60)
-    logger.info("🎯 STOCK CLASSIFIER TRAINING PIPELINE")
+    logger.info("🎯 STOCK CLASSIFIER TRAINING PIPELINE - OPTIMIZED")
     logger.info("="*60)
     
     # 1. Load data
@@ -220,35 +302,48 @@ def main():
     
     # 2. Create target variable
     logger.info("\n🎯 Creating target variable...")
-    df = create_binary_target(df, threshold=0.03, days_ahead=5)
+    df = create_binary_target(df, threshold=0.03, days_ahead=7)
     
     # 3. Train/test split (time-based)
     logger.info("\n✂️ Splitting data...")
     X_train, X_test, y_train, y_test, test_metadata = split_data_by_time(
         df,
-        train_end_date='2024-06-30',  # Train on data through mid-2024
-        test_start_date='2024-07-01'  # Test on recent data
+        train_end_date='2023-06-30',  # Train on data through mid-2024
+        test_start_date='2023-07-01'  # Test on recent data
     )
     
-    # 4. Train model
-    model = train_xgboost(X_train, y_train, X_test, y_test)
+    # 4. Train model with RandomizedSearchCV
+    model, best_params, cv_results = train_xgboost_randomized_search(
+        X_train, y_train, X_test, y_test, 
+        n_iter=40  # More iterations to find better params
+    )
     
     # 5. Evaluate
     metrics, y_pred, y_pred_proba = evaluate_model(model, X_test, y_test)
     
-    # 6. Feature importance
+    # 6. Trading performance
+    trading_metrics = evaluate_trading_performance(test_metadata, y_pred_proba, threshold=0.5)
+    
+    # Test different thresholds
+    logger.info("\n" + "="*60)
+    logger.info("🔍 THRESHOLD ANALYSIS")
+    logger.info("="*60)
+    for thresh in [0.4, 0.5, 0.6]:
+        evaluate_trading_performance(test_metadata, y_pred_proba, threshold=thresh)
+    
+    # 7. Feature importance
     importance_df = plot_feature_importance(model, X_train.columns)
     logger.info(f"\nTop 5 features:\n{importance_df.head()}")
     
-    # 7. Save model
+    # 8. Save model
     save_model(model)
     
     logger.info("\n" + "="*60)
     logger.info("✅ PIPELINE COMPLETE!")
     logger.info("="*60)
     
-    return model, metrics
+    return model, metrics, best_params
 
 
 if __name__ == "__main__":
-    model, metrics = main()
+    model, metrics, best_params = main()

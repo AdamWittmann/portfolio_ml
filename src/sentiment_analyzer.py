@@ -52,7 +52,7 @@ def get_sentiment_score(ticker: str, max_articles: int = 10) -> float:
             return 0.0
         
         avg_sentiment = sum(sentiments) / len(sentiments)
-        logger.info(f"{ticker} average sentiment: {avg_sentiment:.3f} (from {len(sentiments)} articles)")
+        logger.info(f"{ticker} average sentiment: {avg_sentiment:.3f} (from {l3en(sentiments)} articles)")
         
         return avg_sentiment
         
