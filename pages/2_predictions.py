@@ -1,4 +1,4 @@
-# pages/2_🔮_Predictions.py - Stock Predictions
+# pages/2_🔮_Predictions.py - Multi-Stock Forecast Dashboard
 
 import streamlit as st
 import pandas as pd
@@ -6,13 +6,14 @@ import numpy as np
 import xgboost as xgb
 import yfinance as yf
 import plotly.graph_objects as go
+import plotly.express as px
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Stock Predictions", page_icon="🔮", layout="wide")
 
 # Title
-st.title("🔮 Stock Predictions")
-st.markdown("### Get ML-powered buy/sell signals with confidence scores")
+st.title("🔮 Multi-Stock Forecast Dashboard")
+st.markdown("### Compare ML predictions across multiple stocks simultaneously")
 
 # Load model
 @st.cache_resource
@@ -34,13 +35,17 @@ else:
     st.success("✅ Model loaded successfully")
 
 # Sidebar - Input controls
-st.sidebar.header("Prediction Settings")
+st.sidebar.header("Forecast Settings")
 
-ticker_input = st.sidebar.text_input(
-    "Stock Ticker",
-    value="AAPL",
-    help="Enter a valid stock ticker (e.g., AAPL, TSLA, NVDA)"
-).upper()
+# Stock ticker list input
+default_tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'JPM', 'V', 'WMT']
+ticker_input = st.sidebar.text_area(
+    "Stock Tickers (one per line)",
+    value='\n'.join(default_tickers),
+    height=200,
+    help="Enter stock ticker symbols, one per line"
+)
+tickers = [t.strip().upper() for t in ticker_input.split('\n') if t.strip()]
 
 threshold = st.sidebar.slider(
     "Confidence Threshold",
@@ -59,12 +64,23 @@ lookback_days = st.sidebar.number_input(
     help="How many days of historical data to fetch"
 )
 
+# Filters
+st.sidebar.markdown("---")
+st.sidebar.subheader("Display Filters")
+show_only_buys = st.sidebar.checkbox("Show only BUY signals", value=False)
+min_confidence_display = st.sidebar.slider(
+    "Minimum Confidence to Display",
+    min_value=0.0,
+    max_value=1.0,
+    value=0.0,
+    step=0.05,
+    help="Hide stocks below this confidence level"
+)
+
 # Feature calculation functions
 def calculate_features(df):
     """Calculate all 17 features used in training"""
     df = df.copy()
-    
-    # Price features (already have open, high, low, close, Volume)
     
     # SMAs
     df['sma_20'] = df['close'].rolling(window=20).mean()
@@ -110,19 +126,18 @@ FEATURE_COLS = [
     'drawdown', 'rsi', 'macd', 'macd_signal', 'bb_upper', 'bb_lower', 'bb_width'
 ]
 
-# Fetch and process data
+# Fetch and process data for a single ticker
 @st.cache_data(ttl=3600)  # Cache for 1 hour
-def fetch_and_predict(ticker, days):
-    """Fetch stock data and generate prediction"""
+def fetch_stock_data(ticker, days):
+    """Fetch stock data and calculate features"""
     try:
-        # Download data
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days)
         
         stock_data = yf.download(ticker, start=start_date, end=end_date, progress=False)
         
         if stock_data.empty:
-            return None, "No data found for this ticker"
+            return None
         
         # Prepare dataframe - ensure we get clean 1D arrays
         df = pd.DataFrame(index=stock_data.index)
@@ -135,224 +150,220 @@ def fetch_and_predict(ticker, days):
         # Calculate features
         df = calculate_features(df)
         
-        # Drop NaN rows (from rolling calculations)
+        # Drop NaN rows
         df = df.dropna()
         
         if len(df) == 0:
-            return None, "Not enough data to calculate features"
+            return None
+        
+        return df
+        
+    except Exception as e:
+        return None
+
+# Generate predictions for all stocks
+st.header("📊 Forecast Results")
+
+with st.spinner(f"Analyzing {len(tickers)} stocks..."):
+    results = []
+    
+    for ticker in tickers:
+        df = fetch_stock_data(ticker, lookback_days)
+        
+        if df is None or len(df) == 0:
+            continue
         
         # Get most recent row for prediction
         latest = df[FEATURE_COLS].iloc[-1:].copy()
         
-        return df, latest
+        # Make prediction
+        pred_proba = model.predict_proba(latest)[:, 1][0]
+        pred_class = 1 if pred_proba >= threshold else 0
         
-    except Exception as e:
-        return None, f"Error: {str(e)}"
+        # Get current metrics
+        current_price = df['close'].iloc[-1]
+        prev_price = df['close'].iloc[-2]
+        price_change_pct = ((current_price - prev_price) / prev_price) * 100
+        
+        results.append({
+            'Ticker': ticker,
+            'Signal': 'BUY' if pred_class == 1 else 'HOLD',
+            'Confidence': pred_proba,
+            'Current Price': current_price,
+            'Price Change %': price_change_pct,
+            'Target Price': current_price * 1.03,
+            'RSI': latest['rsi'].values[0],
+            'MACD': latest['macd'].values[0],
+            'Volatility': latest['volatility'].values[0],
+            'Drawdown %': latest['drawdown'].values[0] * 100,
+            'SMA 20': latest['sma_20'].values[0],
+            'SMA 50': latest['sma_50'].values[0]
+        })
 
-# Main prediction area
-st.header(f"Prediction for {ticker_input}")
+if len(results) == 0:
+    st.error("❌ No valid data found for any tickers. Please check ticker symbols.")
+    st.stop()
 
-with st.spinner(f"Fetching data for {ticker_input}..."):
-    result, latest = fetch_and_predict(ticker_input, lookback_days)
-    
-    if result is None:
-        st.error(f"❌ {latest}")
-        st.stop()
-    
-    df = result
+# Create results dataframe
+results_df = pd.DataFrame(results)
 
-# Make prediction
-pred_proba = model.predict_proba(latest)[:, 1][0]
-pred_class = 1 if pred_proba >= threshold else 0
+# Apply filters
+filtered_df = results_df.copy()
+if show_only_buys:
+    filtered_df = filtered_df[filtered_df['Signal'] == 'BUY']
+if min_confidence_display > 0:
+    filtered_df = filtered_df[filtered_df['Confidence'] >= min_confidence_display]
 
-# Display prediction
-col1, col2, col3 = st.columns(3)
+# Sort by confidence (highest first)
+filtered_df = filtered_df.sort_values('Confidence', ascending=False)
 
-with col1:
-    st.metric(
-        "Prediction",
-        "🟢 BUY" if pred_class == 1 else "🔴 HOLD/SELL",
-        delta=f"{pred_proba:.1%} confidence"
-    )
-
-with col2:
-    current_price = df['close'].iloc[-1]
-    prev_price = df['close'].iloc[-2]
-    price_change = ((current_price - prev_price) / prev_price) * 100
-    
-    st.metric(
-        "Current Price",
-        f"${current_price:.2f}",
-        delta=f"{price_change:+.2f}%"
-    )
-
-with col3:
-    st.metric(
-        "7-Day Target",
-        f">${current_price * 1.03:.2f}",
-        delta="+3.0% (model target)"
-    )
-
-# Confidence gauge
-st.subheader("Confidence Score")
-
-fig = go.Figure(go.Indicator(
-    mode="gauge+number+delta",
-    value=pred_proba * 100,
-    domain={'x': [0, 1], 'y': [0, 1]},
-    title={'text': "Buy Confidence (%)"},
-    delta={'reference': threshold * 100, 'suffix': "% vs threshold"},
-    gauge={
-        'axis': {'range': [0, 100]},
-        'bar': {'color': "darkgreen" if pred_class == 1 else "darkred"},
-        'steps': [
-            {'range': [0, 30], 'color': "lightgray"},
-            {'range': [30, 50], 'color': "gray"},
-            {'range': [50, 70], 'color': "lightblue"},
-            {'range': [70, 100], 'color': "lightgreen"}
-        ],
-        'threshold': {
-            'line': {'color': "red", 'width': 4},
-            'thickness': 0.75,
-            'value': threshold * 100
-        }
-    }
-))
-
-fig.update_layout(height=300)
-st.plotly_chart(fig, use_container_width=True)
-
-# Feature values
-st.subheader("📊 Current Technical Indicators")
-
+# Summary metrics
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    st.metric("RSI (14)", f"{latest['rsi'].values[0]:.1f}")
-    st.metric("Volatility", f"{latest['volatility'].values[0]:.4f}")
+    buy_count = (results_df['Signal'] == 'BUY').sum()
+    st.metric("BUY Signals", f"{buy_count}/{len(results_df)}")
 
 with col2:
-    st.metric("MACD", f"{latest['macd'].values[0]:.2f}")
-    st.metric("MACD Signal", f"{latest['macd_signal'].values[0]:.2f}")
+    avg_confidence = results_df['Confidence'].mean()
+    st.metric("Average Confidence", f"{avg_confidence:.1%}")
 
 with col3:
-    st.metric("SMA 20", f"${latest['sma_20'].values[0]:.2f}")
-    st.metric("SMA 50", f"${latest['sma_50'].values[0]:.2f}")
+    high_conf_count = (results_df['Confidence'] >= 0.7).sum()
+    st.metric("High Confidence (>70%)", f"{high_conf_count}")
 
 with col4:
-    st.metric("BB Width", f"${latest['bb_width'].values[0]:.2f}")
-    st.metric("Drawdown", f"{latest['drawdown'].values[0]:.2%}")
+    avg_price_change = results_df['Price Change %'].mean()
+    st.metric("Avg Price Change", f"{avg_price_change:+.2f}%")
 
-# Price chart with prediction
-st.subheader("📈 Price History & Indicators")
+# Main forecast table
+st.subheader(f"🎯 Predictions ({len(filtered_df)} stocks)")
 
-fig = go.Figure()
+# Format the dataframe for display
+display_df = filtered_df.copy()
+display_df['Confidence'] = display_df['Confidence'].apply(lambda x: f"{x:.1%}")
+display_df['Current Price'] = display_df['Current Price'].apply(lambda x: f"${x:.2f}")
+display_df['Price Change %'] = display_df['Price Change %'].apply(lambda x: f"{x:+.2f}%")
+display_df['Target Price'] = display_df['Target Price'].apply(lambda x: f"${x:.2f}")
+display_df['RSI'] = display_df['RSI'].apply(lambda x: f"{x:.1f}")
+display_df['MACD'] = display_df['MACD'].apply(lambda x: f"{x:.2f}")
+display_df['Volatility'] = display_df['Volatility'].apply(lambda x: f"{x:.4f}")
+display_df['Drawdown %'] = display_df['Drawdown %'].apply(lambda x: f"{x:.2f}%")
+display_df['SMA 20'] = display_df['SMA 20'].apply(lambda x: f"${x:.2f}")
+display_df['SMA 50'] = display_df['SMA 50'].apply(lambda x: f"${x:.2f}")
 
-# Price
-fig.add_trace(go.Scatter(
-    x=df.index,
-    y=df['close'],
-    name='Close Price',
-    line=dict(color='black', width=2)
-))
+# Color-code the signal column
+def color_signal(val):
+    if val == 'BUY':
+        return 'background-color: #90EE90'  # Light green
+    else:
+        return 'background-color: #FFB6C1'  # Light red
 
-# SMAs
-fig.add_trace(go.Scatter(
-    x=df.index,
-    y=df['sma_20'],
-    name='SMA 20',
-    line=dict(color='blue', width=1, dash='dot')
-))
+styled_df = display_df.style.applymap(color_signal, subset=['Signal'])
 
-fig.add_trace(go.Scatter(
-    x=df.index,
-    y=df['sma_50'],
-    name='SMA 50',
-    line=dict(color='orange', width=1, dash='dot')
-))
+st.dataframe(styled_df, use_container_width=True, height=400)
 
-# Bollinger Bands
-fig.add_trace(go.Scatter(
-    x=df.index,
-    y=df['bb_upper'],
-    name='BB Upper',
-    line=dict(color='red', width=1, dash='dash'),
-    opacity=0.5
-))
+# Visualization tabs
+tab1, tab2, tab3 = st.tabs(["📊 Confidence Distribution", "🎯 Top Picks", "📈 Price vs Confidence"])
 
-fig.add_trace(go.Scatter(
-    x=df.index,
-    y=df['bb_lower'],
-    name='BB Lower',
-    line=dict(color='green', width=1, dash='dash'),
-    fill='tonexty',
-    opacity=0.3
-))
-
-# Prediction marker
-fig.add_trace(go.Scatter(
-    x=[df.index[-1]],
-    y=[df['close'].iloc[-1]],
-    mode='markers',
-    name='Current Position',
-    marker=dict(
-        size=15,
-        color='green' if pred_class == 1 else 'red',
-        symbol='star'
+with tab1:
+    # Confidence distribution histogram
+    fig = px.histogram(
+        results_df,
+        x='Confidence',
+        nbins=20,
+        color='Signal',
+        title="Confidence Score Distribution",
+        labels={'Confidence': 'Confidence Score', 'count': 'Number of Stocks'},
+        color_discrete_map={'BUY': 'green', 'HOLD': 'red'}
     )
-))
+    fig.add_vline(x=threshold, line_dash="dash", line_color="black", 
+                  annotation_text=f"Threshold: {threshold:.0%}")
+    fig.update_layout(height=400)
+    st.plotly_chart(fig, use_container_width=True)
 
-fig.update_layout(
-    title=f"{ticker_input} Price Chart (Last {lookback_days} days)",
-    xaxis_title="Date",
-    yaxis_title="Price ($)",
-    height=500,
-    hovermode='x unified'
+with tab2:
+    # Top 5 BUY recommendations
+    st.subheader("🏆 Top 5 BUY Opportunities (Highest Confidence)")
+    
+    buy_signals = results_df[results_df['Signal'] == 'BUY'].nlargest(5, 'Confidence')
+    
+    if len(buy_signals) == 0:
+        st.warning("No BUY signals at current threshold.")
+    else:
+        for idx, row in buy_signals.iterrows():
+            with st.container():
+                col1, col2, col3, col4 = st.columns([2, 2, 2, 3])
+                
+                with col1:
+                    st.markdown(f"### {row['Ticker']}")
+                    st.markdown(f"**{row['Confidence']:.1%}** confidence")
+                
+                with col2:
+                    st.metric("Current", f"${row['Current Price']:.2f}", 
+                             delta=f"{row['Price Change %']:+.2f}%")
+                
+                with col3:
+                    st.metric("Target", f"${row['Target Price']:.2f}", 
+                             delta="+3.0%")
+                
+                with col4:
+                    st.write(f"**RSI:** {row['RSI']:.1f} | **MACD:** {row['MACD']:.2f}")
+                    st.write(f"**Vol:** {row['Volatility']:.4f} | **DD:** {row['Drawdown %']:.2f}%")
+                
+                st.markdown("---")
+
+with tab3:
+    # Scatter plot: Price change vs Confidence
+    fig = px.scatter(
+        results_df,
+        x='Confidence',
+        y='Price Change %',
+        color='Signal',
+        size='Volatility',
+        hover_data=['Ticker', 'RSI', 'MACD'],
+        title="Price Change vs Model Confidence",
+        labels={'Confidence': 'Model Confidence', 'Price Change %': 'Recent Price Change (%)'},
+        color_discrete_map={'BUY': 'green', 'HOLD': 'red'}
+    )
+    fig.add_hline(y=0, line_dash="dash", line_color="gray")
+    fig.add_vline(x=threshold, line_dash="dash", line_color="black",
+                  annotation_text=f"Threshold")
+    fig.update_layout(height=500)
+    st.plotly_chart(fig, use_container_width=True)
+
+# Download full report
+st.subheader("💾 Export Full Report")
+
+csv = results_df.to_csv(index=False)
+st.download_button(
+    label="📥 Download CSV Report",
+    data=csv,
+    file_name=f"stock_forecast_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+    mime="text/csv"
 )
 
-st.plotly_chart(fig, use_container_width=True)
-
-# Explanation
-st.subheader("ℹ️ How to Interpret")
-
-st.info("""
-**Signal Interpretation:**
-- 🟢 **BUY**: Model predicts >3% return in next 7 days with confidence above threshold
-- 🔴 **HOLD/SELL**: Model confidence below threshold or predicts <3% return
-
-**Confidence Score:**
-- 50-60%: Weak signal
-- 60-70%: Moderate signal
-- 70%+: Strong signal
-
-**Remember:** This is a signal generator, not a complete trading system. Real trading requires:
-- Entry/exit strategy
-- Risk management
-- Transaction cost consideration
-- Market timing
-""")
-
-# Download predictions
-st.subheader("💾 Export Data")
-
-if st.button("Generate Detailed Report"):
-    report_df = pd.DataFrame({
-        'Ticker': [ticker_input],
-        'Date': [df.index[-1]],
-        'Current Price': [current_price],
-        'Prediction': ['BUY' if pred_class == 1 else 'HOLD/SELL'],
-        'Confidence': [f"{pred_proba:.2%}"],
-        'RSI': [latest['rsi'].values[0]],
-        'MACD': [latest['macd'].values[0]],
-        'Volatility': [latest['volatility'].values[0]],
-        'SMA_20': [latest['sma_20'].values[0]],
-        'SMA_50': [latest['sma_50'].values[0]]
-    })
+# Interpretation guide
+with st.expander("ℹ️ How to Interpret This Dashboard"):
+    st.markdown("""
+    **Signal Types:**
+    - 🟢 **BUY**: Model confidence ≥ threshold, predicts >3% return in 7 days
+    - 🔴 **HOLD**: Model confidence < threshold or predicts <3% return
     
-    csv = report_df.to_csv(index=False)
-    st.download_button(
-        label="📥 Download CSV Report",
-        data=csv,
-        file_name=f"{ticker_input}_prediction_{datetime.now().strftime('%Y%m%d')}.csv",
-        mime="text/csv"
-    )
+    **Confidence Levels:**
+    - **50-60%**: Weak signal (barely above random chance)
+    - **60-70%**: Moderate signal (meaningful edge)
+    - **70%+**: Strong signal (high conviction)
+    
+    **Key Metrics:**
+    - **RSI**: Relative Strength Index (>70 overbought, <30 oversold)
+    - **MACD**: Trend momentum (positive = bullish, negative = bearish)
+    - **Volatility**: Recent price fluctuation (higher = riskier)
+    - **Drawdown**: Distance from recent peak (negative = below peak)
+    
+    **Important Reminders:**
+    - This is a **signal generator**, not financial advice
+    - Real trading requires entry/exit rules, risk management, and cost consideration
+    - Past performance (62.4% win rate, 3.64 Sharpe) doesn't guarantee future results
+    - Always do your own research and consider multiple factors
+    """)
