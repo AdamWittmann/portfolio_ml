@@ -1,18 +1,29 @@
+Portfolio ML Analyzer
+
+A Python/Streamlit project for analyzing stock performance, generating technical indicators, and preparing data for future ML models.
+Users can either:
+
+Run ONLY the Streamlit dashboard UI using the provided CSVs
+
+Run the FULL ingestion pipeline using their own local PostgreSQL database
+
 🚀 Quick Start — Choose Your Setup
-👉 If you ONLY want to run the Streamlit UI (NO database required):
+👉 To run JUST the dashboard UI (NO database needed):
 
-Jump directly to: UI-Only Setup
+Jump to UI-Only Setup
 
-👉 If you want the FULL pipeline (data ingestion → CSVs → PostgreSQL):
+👉 To run the FULL pipeline (PostgreSQL + ingestion + CSV generation):
 
-Jump to: Full Pipeline With PostgreSQL
+Jump to Full Pipeline With PostgreSQL
 
 🎨 UI-Only Setup (No Database Required)
 
-This is the simplest and fastest way to use the project.
-You do not need Postgres, a .env file, or the ingestion pipeline.
+This is the fastest and easiest way to use the project.
+The Streamlit UI reads exclusively from CSV backups in data_cache/.
 
-The Streamlit dashboard reads exclusively from the CSV backups in data_cache/.
+No database setup needed.
+No .env file needed.
+No ingestion pipeline needed.
 
 1. Clone the Repository
 git clone https://github.com/AdamWittmann/portfolio_ml.git
@@ -35,59 +46,57 @@ py -3 -m venv .venv
 pip install --upgrade pip
 pip install -r requirements.txt
 
-4. Ensure Cached Data Exists
+4. Ensure data_cache/ Contains CSV Data
 
-The UI loads data from:
+The dashboard loads data such as:
 
-portfolio_ml/
- └─ data_cache/
-      AAPL.csv
-      MSFT.csv
-      ...
+data_cache/
+   AAPL.csv
+   MSFT.csv
+   ...
 
 
-These files are already included in the repo.
-If missing, run the ingestion pipeline (below).
+The repo already includes these.
 
 5. Run the Streamlit Dashboard
 streamlit run streamlit_app.py
 
 
-(Replace streamlit_app.py with your actual filename if different.)
+(Replace streamlit_app.py with your actual filename.)
 
-This launches the UI at:
+Dashboard will launch automatically at:
 
 http://localhost:8501
 
-🎉 That’s It!
+🎉 That's All You Need for the UI!
 
-You now have the full dashboard running with:
+You now have:
 
-Technical indicators
-
-Charts
-
-Tables
+Stock charts
 
 Risk metrics
 
-No local database required.
+Technical indicators
+
+Data tables
+
+Right out of the box — no Postgres required.
 
 🔥 Full Pipeline With PostgreSQL
 
-This option is for developers who want to:
+Use this version if you want:
 
-Pull fresh stock data
+Fresh data updates
 
-Generate CSV backups
+Daily OHLCV ingestion
 
-Load data into a local PostgreSQL database
+Data engineering
 
-Run ML-ready analytics
+A real relational database backend
 
-Prepare full-feature datasets
+ML-ready datasets
 
-If you're building backend features or ML workflows, use this mode.
+This requires installing and configuring PostgreSQL locally.
 
 1. Prerequisites
 
@@ -99,13 +108,11 @@ PostgreSQL 14+
 
 Git
 
-(Optional) Docker
-
 2. Clone the Repo
 git clone https://github.com/AdamWittmann/portfolio_ml.git
 cd portfolio_ml
 
-3. Create and Activate a Virtual Environment
+3. Create & Activate Virtual Environment
 
 macOS / Linux / Git Bash
 
@@ -122,49 +129,46 @@ py -3 -m venv .venv
 pip install --upgrade pip
 pip install -r requirements.txt
 
-5. Set Up PostgreSQL
-
-You must create your own local database.
-You are not connecting to Adam’s database.
-
-Option A — Install PostgreSQL Natively
-Linux (Debian/Ubuntu)
-sudo apt-get install postgresql
-
+5. Install PostgreSQL (Native Install Only — No Docker)
 macOS (Homebrew)
 brew install postgresql
 brew services start postgresql
 
+Ubuntu/Debian Linux
+sudo apt-get update
+sudo apt-get install postgresql
+
 Windows
 
-Install from:
+Install from the official PostgreSQL website:
 https://www.postgresql.org/download/
 
-Option B — Run PostgreSQL in Docker
-docker run --name portfolio_ml_db \
-  -e POSTGRES_USER=mluser \
-  -e POSTGRES_PASSWORD=mlpassword \
-  -e POSTGRES_DB=portfolio_ml \
-  -p 5432:5432 \
-  -d postgres:16
-
-6. Create Your Local Database (If Not Using Docker’s AUTO DB)
+6. Create Your Local Database
 
 Enter psql:
+
+macOS/Linux
 
 sudo -u postgres psql
 
 
-Then run:
+Windows
+
+Open “SQL Shell (psql)” from Start Menu.
+
+Inside psql, run:
 
 CREATE USER mluser WITH PASSWORD 'mlpassword';
 CREATE DATABASE portfolio_ml OWNER mluser;
 GRANT ALL PRIVILEGES ON DATABASE portfolio_ml TO mluser;
 \q
 
+
+Feel free to change username/password — just keep them consistent with your .env.
+
 7. Create Your .env File
 
-At the repo root:
+At the project root:
 
 touch .env
 
@@ -181,62 +185,62 @@ DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTG
 
 8. Run the Data Loader Pipeline
 
-This pulls fresh OHLCV data, writes CSV backups, and populates your DB.
+This pulls market data, writes CSV backups, and populates your database.
 
 bash run_data_loader.sh
 
 
-If you're on Windows without bash, open the script and run the equivalent Python command inside it manually.
+If using Windows PowerShell (no bash), open the script and run the Python command inside manually.
 
-9. Verify Setup
-CSVs Created?
-ls data_cache
-
-Database reachable?
+9. Verify Everything Works
+Check database tables:
 psql $DATABASE_URL -c "\dt"
 
-Python dependencies?
-python -c "import pandas, yfinance, sqlalchemy; print('OK')"
+Check CSV cache:
+ls data_cache
 
-🧭 Typical Developer Workflow
+Check Python dependencies:
+python -c "import pandas, sqlalchemy, yfinance; print('OK')"
 
-Activate your virtual environment
+🧭 Workflow Summary
+UI-Only Users:
 
-Pull latest project changes
+Clone repo
 
-Run the data loader to update datasets
+Install dependencies
 
-Build or test ML models
+Run Streamlit
+
+Done
+
+Full-Pipeline Users:
+
+Clone repo
+
+Install dependencies
+
+Install PostgreSQL
+
+Create database + .env
+
+Run data loader
 
 Launch Streamlit (optional)
 
-Commit code changes
-
 📝 Troubleshooting
-Database errors
-
-Ensure Postgres is running
-
-Check .env correctness
-
-Ensure your DB user has privileges
-
-command not found: streamlit
-
-Install it:
-
+Streamlit not found
 pip install streamlit
+
+psql “connection refused”
+
+Postgres service might not be running.
 
 ModuleNotFoundError
 
-Your venv may not be active.
+Activate your venv:
 
-📌 Notes
+source .venv/bin/activate
 
-The CSV backup layer allows users without Postgres to fully use the UI.
+Permission denied when creating DB
 
-The database pipeline is only required for backend and ML feature development.
-
-Your teammate does NOT need Adam’s credentials.
-
-Everything is self-contained on their own local machine.
+Make sure you're running psql as the correct user (postgres superuser on Linux/macOS).
