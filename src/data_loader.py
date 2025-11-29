@@ -72,7 +72,7 @@ def push_to_db(df: pd.DataFrame, ticker: str):
         "High": "high",
         "Low":  "low",
         "Close":"close",
-        "Volume":"volume",
+        "Volume": "Volume",
     }
     df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
 
