@@ -9,10 +9,10 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
 
-st.set_page_config(page_title="Stock Predictions", page_icon="🔮", layout="wide")
+st.set_page_config(page_title="Stock Predictions", page_icon="", layout="wide")
 
 # Title
-st.title("🔮 Multi-Stock Forecast Dashboard")
+st.title("Multi-Stock Forecast Dashboard")
 st.markdown("### Compare ML predictions across multiple stocks simultaneously")
 
 # Load model
@@ -162,7 +162,7 @@ def fetch_stock_data(ticker, days):
         return None
 
 # Generate predictions for all stocks
-st.header("📊 Forecast Results")
+st.header("Forecast Results")
 
 with st.spinner(f"Analyzing {len(tickers)} stocks..."):
     results = []
@@ -264,7 +264,7 @@ styled_df = display_df.style.applymap(color_signal, subset=['Signal'])
 st.dataframe(styled_df, use_container_width=True, height=400)
 
 # Visualization tabs
-tab1, tab2, tab3 = st.tabs(["📊 Confidence Distribution", "🎯 Top Picks", "📈 Price vs Confidence"])
+tab1, tab2, tab3 = st.tabs(["Confidence Distribution", "Top Picks", "Price vs Confidence"])
 
 with tab1:
     # Confidence distribution histogram
@@ -284,7 +284,7 @@ with tab1:
 
 with tab2:
     # Top 5 BUY recommendations
-    st.subheader("🏆 Top 5 BUY Opportunities (Highest Confidence)")
+    st.subheader("Top 5 BUY Opportunities (Highest Confidence)")
     
     buy_signals = results_df[results_df['Signal'] == 'BUY'].nlargest(5, 'Confidence')
     
