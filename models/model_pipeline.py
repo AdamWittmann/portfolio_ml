@@ -95,6 +95,140 @@ def split_data_by_time(df: pd.DataFrame, train_end_date: str, test_start_date: s
     logger.info(f"Test buy rate: {y_test.mean():.2%}")
     
     return X_train, X_test, y_train, y_test, test_metadata
+def generate_walkforward_folds(df: pd.DataFrame, fold_specs, train_start_date=None):
+    """
+    Build walk-forward train/test folds based on date ranges.
+
+    fold_specs: list of (test_start_str, test_end_str) in 'YYYY-MM-DD' format.
+    train_start_date: earliest date to use as training start (inclusive).
+    """
+    df = df.sort_values(['symbol', 'date']).copy()
+
+    if train_start_date is None:
+        train_start = df['date'].min()
+    else:
+        train_start = pd.to_datetime(train_start_date)
+
+    folds = []
+
+    for test_start_str, test_end_str in fold_specs:
+        test_start = pd.to_datetime(test_start_str)
+        test_end = pd.to_datetime(test_end_str)
+
+        train_mask = (df['date'] >= train_start) & (df['date'] < test_start)
+        test_mask = (df['date'] >= test_start) & (df['date'] <= test_end)
+
+        train_df = df[train_mask].copy()
+        test_df = df[test_mask].copy()
+
+        if train_df.empty or test_df.empty:
+            logger.warning(
+                f"Skipping fold {test_start_str} to {test_end_str}: "
+                f"train_rows={len(train_df)}, test_rows={len(test_df)}"
+            )
+            continue
+
+        X_train, y_train, _ = prepare_features(train_df)
+        X_test, y_test, test_metadata = prepare_features(test_df)
+
+        logger.info(
+            f"\nFold {test_start_str} → {test_end_str}: "
+            f"train_samples={len(X_train)}, test_samples={len(X_test)}"
+        )
+
+        folds.append({
+            'test_start': test_start,
+            'test_end': test_end,
+            'X_train': X_train,
+            'y_train': y_train,
+            'X_test': X_test,
+            'y_test': y_test,
+            'metadata': test_metadata,
+        })
+
+    if not folds:
+        raise ValueError("No valid walk-forward folds were created. Check your date ranges.")
+
+    logger.info(f"\nTotal walk-forward folds created: {len(folds)}")
+    return folds
+def train_xgboost_walkforward_search(folds, n_iter=30, random_state=42):
+    """
+    Manual RandomizedSearch over XGBoost hyperparameters using walk-forward folds.
+    For each sampled param set, we train on each fold's train data and
+    evaluate ROC-AUC on that fold's test data, then average over folds.
+    """
+    rng = np.random.default_rng(random_state)
+
+    # Compute a global class weight based on all training data across folds
+    y_all = pd.concat([f['y_train'] for f in folds], axis=0)
+    n_neg = (y_all == 0).sum()
+    n_pos = (y_all == 1).sum()
+    scale_pos_weight = n_neg / max(n_pos, 1)
+    logger.info(f"\nGlobal class weight (scale_pos_weight): {scale_pos_weight:.2f}")
+
+    # Parameter ranges (same spirit as before)
+    def sample_params():
+        return {
+            'n_estimators': int(rng.integers(100, 300)),
+            'max_depth': int(rng.integers(3, 8)),
+            'learning_rate': float(rng.uniform(0.01, 0.2)),
+            'min_child_weight': int(rng.integers(3, 25)),
+            'gamma': float(rng.uniform(0.0, 0.5)),
+            'subsample': float(rng.uniform(0.6, 1.0)),
+            'colsample_bytree': float(rng.uniform(0.6, 1.0)),
+            'reg_alpha': float(rng.uniform(0.0, 1.0)),
+            'reg_lambda': float(rng.uniform(0.5, 2.0)),
+        }
+
+    best_params = None
+    best_score = -np.inf
+    results = []
+
+    logger.info(f"\n🚀 Starting walk-forward RandomizedSearch: {n_iter} parameter sets")
+
+    for i in range(n_iter):
+        params = sample_params()
+        fold_scores = []
+
+        for fold_idx, fold in enumerate(folds):
+            model = XGBClassifier(
+                scale_pos_weight=scale_pos_weight,
+                random_state=random_state,
+                tree_method='hist',
+                eval_metric='logloss',
+                **params
+            )
+
+            model.fit(fold['X_train'], fold['y_train'])
+            y_proba = model.predict_proba(fold['X_test'])[:, 1]
+            score = roc_auc_score(fold['y_test'], y_proba)
+            fold_scores.append(score)
+
+        mean_score = float(np.mean(fold_scores))
+        std_score = float(np.std(fold_scores))
+
+        logger.info(
+            f"Iter {i+1}/{n_iter}: mean ROC-AUC = {mean_score:.4f} "
+            f"(±{std_score:.4f}) with params={params}"
+        )
+
+        results.append({
+            'params': params,
+            'mean_score': mean_score,
+            'std_score': std_score,
+        })
+
+        if mean_score > best_score:
+            best_score = mean_score
+            best_params = params
+
+    logger.info(f"\n🏆 Best mean ROC-AUC over folds: {best_score:.4f}")
+    logger.info("🏆 Best parameters:")
+    for k, v in best_params.items():
+        logger.info(f"   {k}: {v}")
+
+    results_df = pd.DataFrame(results).sort_values('mean_score', ascending=False)
+    return best_params, results_df
 
 
 def train_xgboost_randomized_search(X_train, y_train, X_test, y_test, n_iter=30):
@@ -364,59 +498,113 @@ def save_model(model, filepath='models/stock_classifier.json'):
 
 def main():
     """
-    Full training pipeline with RandomizedSearchCV optimization.
+    Full training pipeline with walk-forward validation and
+    custom randomized hyperparameter search over XGBoost.
     """
     logger.info("="*60)
-    logger.info(" STOCK CLASSIFIER TRAINING PIPELINE - OPTIMIZED")
+    logger.info(" STOCK CLASSIFIER TRAINING PIPELINE - WALK-FORWARD")
     logger.info("="*60)
-    
+
     # 1. Load data
     logger.info("\nLoading data from database...")
     df = pd.read_sql("SELECT * FROM prices ORDER BY symbol, date", engine)
+    df['date'] = pd.to_datetime(df['date'])
     logger.info(f"Loaded {len(df)} rows, {len(df.columns)} columns")
-    
+
     # 2. Create target variable
     logger.info("\nCreating target variable...")
     df = create_binary_target(df, threshold=0.03, days_ahead=7)
-    
-    # 3. Train/test split (time-based)
-    logger.info("\n Splitting data...")
-    X_train, X_test, y_train, y_test, test_metadata = split_data_by_time(
+
+    # 3. Define walk-forward folds (you can tweak these ranges)
+    logger.info("\nDefining walk-forward folds...")
+    fold_specs = [
+        ("2023-01-01", "2023-06-30"),
+        ("2023-07-01", "2023-12-31"),
+        ("2024-01-01", "2024-06-30"),
+        ("2024-07-01", "2024-12-31"),
+    ]
+
+    train_start_date = df['date'].min().date()
+    logger.info(f"Using {train_start_date} as initial training start date")
+
+    folds = generate_walkforward_folds(
         df,
-        train_end_date='2024-12-25',  # Train on data through mid-2023
-        test_start_date='2024-12-26'  # Test on recent data
+        fold_specs=fold_specs,
+        train_start_date=train_start_date
     )
-    
-    # 4. Train model with RandomizedSearchCV
-    model, best_params, cv_results = train_xgboost_randomized_search(
-        X_train, y_train, X_test, y_test, 
+
+    # 4. Hyperparameter search across all folds
+    best_params, cv_results = train_xgboost_walkforward_search(
+        folds,
+        n_iter=30,
+        random_state=42
     )
-    
-    # 5. Evaluate
-    metrics, y_pred, y_pred_proba = evaluate_model(model, X_test, y_test)
-    
-    # 6. Trading performance
-    trading_metrics = evaluate_trading_performance(test_metadata, y_pred_proba, threshold=0.5)
-    
-    # Test different thresholds
+
+    # 5. Evaluate best params on each fold (full walk-forward)
     logger.info("\n" + "="*60)
-    logger.info("🔍 THRESHOLD ANALYSIS")
+    logger.info("📊 WALK-FORWARD EVALUATION WITH BEST PARAMS")
     logger.info("="*60)
-    for thresh in [0.4, 0.5, 0.6]:
-        evaluate_trading_performance(test_metadata, y_pred_proba, threshold=thresh)
-    
-    # 7. Feature importance
-    importance_df = plot_feature_importance(model, X_train.columns)
-    logger.info(f"\nTop 5 features:\n{importance_df.head()}")
-    
-    # 8. Save model
-    save_model(model)
-    
+
+    final_model = None
+    final_metrics = None
+    final_metadata = None
+    final_y_pred_proba = None
+
+    for i, fold in enumerate(folds):
+        logger.info(
+            f"\n===== Fold {i+1}/{len(folds)}: "
+            f"Train <= {fold['test_start'].date() - pd.Timedelta(days=1)}, "
+            f"Test {fold['test_start'].date()} → {fold['test_end'].date()} ====="
+        )
+
+        # Recompute class weight per fold
+        y_train = fold['y_train']
+        n_neg = (y_train == 0).sum()
+        n_pos = (y_train == 1).sum()
+        scale_pos_weight = n_neg / max(n_pos, 1)
+
+        model = XGBClassifier(
+            scale_pos_weight=scale_pos_weight,
+            random_state=42,
+            tree_method='hist',
+            eval_metric='logloss',
+            **best_params
+        )
+
+        model.fit(fold['X_train'], fold['y_train'])
+
+        metrics, y_pred, y_pred_proba = evaluate_model(
+            model,
+            fold['X_test'],
+            fold['y_test']
+        )
+
+        evaluate_trading_performance(fold['metadata'], y_pred_proba, threshold=0.5)
+
+        # Keep the last fold's model/metrics as "final" (most recent period)
+        if i == len(folds) - 1:
+            final_model = model
+            final_metrics = metrics
+            final_metadata = fold['metadata']
+            final_y_pred_proba = y_pred_proba
+
+    # 6. Feature importance based on final (most recent) model
+    if final_model is not None:
+        importance_df = plot_feature_importance(final_model, folds[-1]['X_train'].columns)
+        logger.info(f"\nTop 5 features:\n{importance_df.head()}")
+
+        # 7. Save final model
+        save_model(final_model)
+    else:
+        logger.warning("No final model was trained — check fold definitions.")
+        final_metrics = {}
+        best_params = {}
+
     logger.info("\n" + "="*60)
-    logger.info("✅ PIPELINE COMPLETE!")
+    logger.info("✅ WALK-FORWARD PIPELINE COMPLETE!")
     logger.info("="*60)
-    
-    return model, metrics, best_params
+
+    return final_model, final_metrics, best_params
 
 
 if __name__ == "__main__":

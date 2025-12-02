@@ -6,154 +6,177 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# Page config (removed the fileWatcherType line)
+# Page config
 st.set_page_config(
     page_title="Stock Signal Generator",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-# Get absolute paths using hardcoded path
-PROJECT_ROOT = Path('/home/Adam/Projects/MachineLearning/portfolio_ml')
-METRICS_PATH = PROJECT_ROOT / 'model_metrics.csv'
-TRADING_METRICS_PATH = PROJECT_ROOT / 'trading_metrics.csv'
-PIPELINE_PATH = PROJECT_ROOT / 'models' / 'model_pipeline.py'
-GENERATE_METRICS_PATH = PROJECT_ROOT / 'models' / 'generate_metrics.py'
+# Hardcoded project root (your machine)
+PROJECT_ROOT = Path("/home/Adam/Projects/MachineLearning/portfolio_ml")
+METRICS_PATH = PROJECT_ROOT / "model_metrics.csv"
+TRADING_METRICS_PATH = PROJECT_ROOT / "trading_metrics.csv"
+PIPELINE_PATH = PROJECT_ROOT / "models" / "model_pipeline.py"
+GENERATE_METRICS_PATH = PROJECT_ROOT / "models" / "generate_metrics.py"
 
-# ---------- Load Model Metrics ----------
+
+# ---------- Load Metrics ----------
+@st.cache_data
+def load_trading_metrics():
+    """Load trading metrics safely with flexible CSV format support."""
+    try:
+        if TRADING_METRICS_PATH.exists():
+            df = pd.read_csv(TRADING_METRICS_PATH)
+
+            # Case 1: key/value format (metric,value)
+            if "metric" in df.columns and "value" in df.columns:
+                return df.set_index("metric")["value"]
+
+            # Case 2: single-row dataframe with columns
+            if df.shape[0] == 1:
+                return df.iloc[0]
+
+            # Case 3: unknown format → attempt first row
+            return df.iloc[0]
+
+    except Exception as e:
+        st.sidebar.error(f"Error loading trading metrics: {e}")
+
+    # Fallback
+    return pd.Series({
+        "win_rate": 0.0,
+        "sharpe_ratio": 0.0,
+        "avg_return": 0.0,
+        "n_trades": 0
+    })
+
+
+
 @st.cache_data
 def load_model_metrics():
-    """Load model performance metrics if available"""
+    """Load final-fold model performance metrics in flexible formats."""
     try:
         if METRICS_PATH.exists():
             df = pd.read_csv(METRICS_PATH, index_col=0)
-            return df
+
+            # Case 1: Already in final-fold format (metric/value)
+            if "value" in df.columns:
+                return df
+
+            # Case 2: Train/Test format → use Test column
+            if "Test" in df.columns:
+                return df[["Test"]].rename(columns={"Test": "value"})
+
+            # Case 3: Multiple columns → assume last is final fold
+            if df.shape[1] >= 1:
+                last_col = df.columns[-1]
+                return df[[last_col]].rename(columns={last_col: "value"})
+
     except Exception as e:
         st.sidebar.error(f"Error loading metrics: {e}")
-    
-    # Default fallback metrics
-    return pd.DataFrame({
-        'Train': {
-            'Accuracy': 0.0,
-            'Precision': 0.0,
-            'Recall': 0.0,
-            'F1 Score': 0.0,
-            'ROC AUC': 0.0
-        },
-        'Test': {
-            'Accuracy': 0.0,
-            'Precision': 0.0,
-            'Recall': 0.0,
-            'F1 Score': 0.0,
-            'ROC AUC': 0.0
-        }
-    })
 
-@st.cache_data
-def load_trading_metrics():
-    """Load trading performance metrics if available"""
-    try:
-        if TRADING_METRICS_PATH.exists():
-            df = pd.read_csv(TRADING_METRICS_PATH, index_col=0)
-            return df.iloc[0]
-    except Exception as e:
-        st.sidebar.error(f"Error loading trading metrics: {e}")
-    
     # Default fallback
-    return pd.Series({
-        'win_rate': 0.0,
-        'sharpe_ratio': 0.0,
-        'avg_return': 0.0,
-        'n_trades': 0
-    })
+    return pd.DataFrame({"value": [0, 0, 0, 0, 0]},
+                        index=["Accuracy", "Precision", "Recall", "F1 Score", "ROC AUC"])
+
+
 
 def get_last_training_time():
-    """Get the last time the model was trained"""
+    """Get last time metrics file was updated (proxy for last training)."""
     try:
         if METRICS_PATH.exists():
             mod_time = METRICS_PATH.stat().st_mtime
-            return datetime.fromtimestamp(mod_time).strftime('%Y-%m-%d %H:%M:%S')
-    except:
+            return datetime.fromtimestamp(mod_time).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
         pass
     return "Never"
 
+
 def run_model_pipeline():
-    """Run the model training pipeline"""
+    """Run the model training pipeline (walk-forward pipeline)."""
     try:
-        # Check if pipeline exists
         if not PIPELINE_PATH.exists():
             return False, f"❌ Could not find pipeline at {PIPELINE_PATH}"
-        
-        # Run the pipeline script from project root
+
         result = subprocess.run(
             [sys.executable, str(PIPELINE_PATH)],
             capture_output=True,
             text=True,
-            timeout=600,  # 10 minute timeout
-            cwd=str(PROJECT_ROOT)  # Run from project root
+            timeout=600,
+            cwd=str(PROJECT_ROOT),
         )
-        
+
         if result.returncode == 0:
             return True, result.stdout
         else:
             return False, result.stderr
-            
     except subprocess.TimeoutExpired:
-        return False, "⏱️ Training timed out after 10 minutes"
+        return False, "Training timed out after 10 minutes"
     except Exception as e:
-        return False, f"💥 Exception: {str(e)}"
+        return False, f"Exception: {str(e)}"
 
-# ---------- Sidebar with Model Metrics ----------
+
+# ---------- Sidebar ----------
 with st.sidebar:
-    st.markdown("Model Performance")
-    
-    # Initialize session state for button clicks
-    if 'training_in_progress' not in st.session_state:
+    st.markdown("### Model Performance (Final Walk-Forward Fold)")
+
+    # Initialize session state flags
+    if "training_in_progress" not in st.session_state:
         st.session_state.training_in_progress = False
-    if 'metrics_in_progress' not in st.session_state:
+    if "metrics_in_progress" not in st.session_state:
         st.session_state.metrics_in_progress = False
-    
-    # Training buttons
+
+    # Buttons: Train + Metrics
     col1, col2 = st.columns([1, 1])
-    
+
+    # Train button
     with col1:
-        train_button = st.button("Train", type="primary", use_container_width=True, 
-                                 help="Full training pipeline",
-                                 disabled=st.session_state.training_in_progress)
-        
+        train_button = st.button(
+            "Train",
+            type="primary",
+            use_container_width=True,
+            help="Run full walk-forward training pipeline",
+            disabled=st.session_state.training_in_progress,
+        )
+
         if train_button and not st.session_state.training_in_progress:
             st.session_state.training_in_progress = True
-            
+
             load_model_metrics.clear()
             load_trading_metrics.clear()
-            
+
             with st.spinner("Training model... This may take several minutes"):
                 success, output = run_model_pipeline()
-            
+
             st.session_state.training_in_progress = False
-            
+
             if success:
                 st.success("Training complete!")
-                st.info("Click Refresh to view metrics")
+                st.info("Click Metrics to recompute metrics, then Refresh.")
             else:
                 st.error("Training failed")
                 with st.expander("Show error details"):
                     st.code(output)
-    
+
+    # Metrics button
     with col2:
-        metrics_button = st.button("Metrics", use_container_width=True, 
-                                   help="Regenerate metrics from saved model",
-                                   disabled=st.session_state.metrics_in_progress)
-        
+        metrics_button = st.button(
+            "Metrics",
+            use_container_width=True,
+            help="Recompute metrics for the saved model on the final fold window",
+            disabled=st.session_state.metrics_in_progress,
+        )
+
         if metrics_button and not st.session_state.metrics_in_progress:
             st.session_state.metrics_in_progress = True
-            
+
             load_model_metrics.clear()
             load_trading_metrics.clear()
-            
+
             if not GENERATE_METRICS_PATH.exists():
-                st.error(f" generate_metrics.py not found")
+                st.error("generate_metrics.py not found")
                 st.session_state.metrics_in_progress = False
             else:
                 with st.spinner("Generating metrics..."):
@@ -161,77 +184,86 @@ with st.sidebar:
                         [sys.executable, str(GENERATE_METRICS_PATH)],
                         capture_output=True,
                         text=True,
-                        timeout=60,
-                        cwd=str(PROJECT_ROOT)
+                        timeout=300,
+                        cwd=str(PROJECT_ROOT),
                     )
-                    
+
                 st.session_state.metrics_in_progress = False
-                
+
                 if result.returncode == 0:
-                    st.success("Metrics updated!")
-                    # User must manually refresh to see changes
+                    st.success("Metrics updated! Click Refresh to see latest values.")
                 else:
                     st.error("Failed to generate metrics")
                     with st.expander("Show error"):
                         st.code(result.stderr)
-    
+
     # Refresh button
-    if st.button("🔄 Refresh", use_container_width=True):
+    if st.button("Refresh", use_container_width=True):
         load_model_metrics.clear()
         load_trading_metrics.clear()
         st.rerun()
-    
+
     last_trained = get_last_training_time()
-    st.caption(f"Last trained: {last_trained}")
-    
+    st.caption(f"Last metrics update (final fold): {last_trained}")
+
     st.divider()
-    
+
     # Load metrics
     model_metrics = load_model_metrics()
     trading_metrics = load_trading_metrics()
-    
-    # Check if we have real data
-    has_data = model_metrics.loc['Accuracy', 'Test'] > 0
-    
-    if not has_data:
-        st.warning("No training data yet. Click 'Train Model' to begin.")
-    
-    # Classification Metrics
-    st.markdown("Classification Metrics")
-    
+
+    has_real_metrics = model_metrics["value"].max() > 0
+
+    if not has_real_metrics:
+        st.warning("No metrics yet. Click Train, then Metrics to generate them.")
+
+    # Classification Metrics (Final Fold)
+    st.markdown("#### Classification Metrics (Final Fold)")
     col1, col2 = st.columns(2)
-    
+
     with col1:
-        st.metric("Train Accuracy", f"{model_metrics.loc['Accuracy', 'Train']:.2%}")
-        st.metric("Train Precision", f"{model_metrics.loc['Precision', 'Train']:.2%}")
-        st.metric("Train Recall", f"{model_metrics.loc['Recall', 'Train']:.2%}")
-    
+        st.metric(
+            "Accuracy",
+            f"{model_metrics.loc['Accuracy', 'value']:.2%}",
+        )
+        st.metric(
+            "Precision",
+            f"{model_metrics.loc['Precision', 'value']:.2%}",
+        )
+
     with col2:
-        st.metric("Test Accuracy", f"{model_metrics.loc['Accuracy', 'Test']:.2%}")
-        st.metric("Test Precision", f"{model_metrics.loc['Precision', 'Test']:.2%}")
-        st.metric("Test Recall", f"{model_metrics.loc['Recall', 'Test']:.2%}")
-    
-    st.metric("Test ROC AUC", f"{model_metrics.loc['ROC AUC', 'Test']:.3f}")
-    
+        st.metric(
+            "Recall",
+            f"{model_metrics.loc['Recall', 'value']:.2%}",
+        )
+        st.metric(
+            "F1 Score",
+            f"{model_metrics.loc['F1 Score', 'value']:.2%}",
+        )
+
+    st.metric("ROC AUC", f"{model_metrics.loc['ROC AUC', 'value']:.3f}")
+
+    st.caption("Final walk-forward evaluation window: 2024-07-01 → 2024-12-31")
+
     st.divider()
-    
+
     # Trading Performance
-    st.markdown("Trading Performance")
-    
+    st.markdown("#### Trading Performance (Final Fold)")
     st.metric("Win Rate", f"{trading_metrics['win_rate']:.1%}")
     st.metric("Sharpe Ratio", f"{trading_metrics['sharpe_ratio']:.2f}")
-    st.metric("Avg Return", f"{trading_metrics['avg_return']:.2%}")
+    st.metric("Avg Return per Trade", f"{trading_metrics['avg_return']:.2%}")
     st.metric("Total Trades", f"{int(trading_metrics['n_trades']):,}")
-    
+
     st.divider()
-    
-    # Debug info (collapsible)
+
+    # Debug info
     with st.expander("Debug Info"):
         st.text(f"Project Root: {PROJECT_ROOT}")
-        st.text(f"Pipeline: {PIPELINE_PATH.exists()}")
-        st.text(f"Generate Script: {GENERATE_METRICS_PATH.exists()}")
-        st.text(f"Metrics CSV: {METRICS_PATH.exists()}")
-        st.text(f"Trading CSV: {TRADING_METRICS_PATH.exists()}")
+        st.text(f"Pipeline exists: {PIPELINE_PATH.exists()}")
+        st.text(f"Generate Script exists: {GENERATE_METRICS_PATH.exists()}")
+        st.text(f"Metrics CSV exists: {METRICS_PATH.exists()}")
+        st.text(f"Trading CSV exists: {TRADING_METRICS_PATH.exists()}")
+
 
 # ---------- Custom styling ----------
 st.markdown(
@@ -425,10 +457,10 @@ st.markdown(
   <div class="card">
     <h3>How to Use This Dashboard</h3>
     <ol>
-      <li>Click <strong>🚀 Train</strong> in the sidebar to train on latest data.</li>
-      <li>On the <strong>EDA</strong> page, review price history, indicator behavior, and correlations.</li>
-      <li>Inspect the <strong>feature tables</strong> and labels that feed ML models.</li>
-      <li>Monitor model performance metrics in the sidebar.</li>
+      <li>Click <strong>🚀 Train</strong> in the sidebar to train using walk-forward validation.</li>
+      <li>Click <strong>Metrics</strong> to recompute final-fold performance from the saved model.</li>
+      <li>Use the <strong>EDA</strong> and other pages (if added) to explore data and features.</li>
+      <li>Monitor the <strong>classification and trading metrics</strong> in the sidebar.</li>
     </ol>
     <p>
     This gives both technical and non-technical readers a concrete view of what our pipeline produces.
@@ -452,7 +484,7 @@ st.markdown(
       <li>Consistent labeling scheme based on forward returns.</li>
       <li>
         Clear separation between <strong>data ingestion</strong>,
-        <strong>feature engineering</strong>, and <strong>visualization</strong>.
+        <strong>feature engineering</strong>, and <strong>model evaluation</strong>.
       </li>
       <li>
         Design that supports comparison of several ML models on the same feature space.

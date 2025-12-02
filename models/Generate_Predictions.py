@@ -1,4 +1,4 @@
-# predict.py - Generate predictions from saved model
+# predict.py - Generate predictions using walk-forward final model
 
 import pandas as pd
 import numpy as np
@@ -26,42 +26,27 @@ def create_binary_target(df, threshold=0.03, days_ahead=7):
 
 
 def prepare_features(df):
-    """Prepare feature matrix X and target y"""
+    """Prepare feature matrix X and metadata"""
     exclude_cols = ['id', 'symbol', 'date', 'target', 'future_return', 'future_close']
     feature_cols = [col for col in df.columns if col not in exclude_cols]
     
     X = df[feature_cols]
-    y = df['target']
     metadata = df[['symbol', 'date', 'target', 'future_return']].copy()
     
-    return X, y, metadata
-
-
-def split_data_by_time(df, train_end_date, test_start_date):
-    """Split data temporally"""
-    train_end = pd.to_datetime(train_end_date).date()
-    test_start = pd.to_datetime(test_start_date).date()
-    
-    train_df = df[df['date'] <= train_end].copy()
-    test_df = df[df['date'] >= test_start].copy()
-    
-    X_train, y_train, _ = prepare_features(train_df)
-    X_test, y_test, test_metadata = prepare_features(test_df)
-    
-    return X_train, X_test, y_train, y_test, test_metadata
+    return X, metadata
 
 
 def main():
     logger.info("="*60)
-    logger.info("🔮 GENERATING PREDICTIONS FROM SAVED MODEL")
+    logger.info("🔮 GENERATING PREDICTIONS (WALK-FORWARD MODEL)")
     logger.info("="*60)
-    
+
     # 1. Load model
     logger.info("\n📥 Loading model...")
     try:
         model = xgb.XGBClassifier()
         model.load_model('models/stock_classifier.json')
-        logger.info("✅ Loaded models/stock_classifier.json")
+        logger.info("✅ Loaded final walk-forward model")
     except FileNotFoundError:
         logger.error("❌ Model not found! Run model_pipeline.py first.")
         return
@@ -69,41 +54,52 @@ def main():
     # 2. Load data
     logger.info("\n📥 Loading data...")
     df = pd.read_sql("SELECT * FROM prices ORDER BY symbol, date", engine)
+    df['date'] = pd.to_datetime(df['date'])
     logger.info(f"Loaded {len(df):,} rows")
-    
-    # 3. Create target
-    logger.info("\n🎯 Creating target...")
+
+    # 3. Create target & features
+    logger.info("\n🎯 Creating target + features...")
     df = create_binary_target(df, threshold=0.03, days_ahead=7)
-    
-    # 4. Split (same as training)
-    logger.info("\n✂️ Splitting data...")
-    X_train, X_test, y_train, y_test, test_metadata = split_data_by_time(
-        df,
-        train_end_date='2024-12-25',
-        test_start_date='2024-12-26'
+
+    # 4. Select FUTURE data only (after last training fold)
+    prediction_start = pd.to_datetime("2025-01-01")
+    pred_df = df[df['date'] >= prediction_start].copy()
+
+    if pred_df.empty:
+        logger.error("❌ No future rows available for predictions!")
+        return
+
+    logger.info(
+        f"Prediction window: {pred_df['date'].min().date()} → "
+        f"{pred_df['date'].max().date()} | {len(pred_df):,} rows"
     )
-    
-    logger.info(f"Test set: {len(X_test):,} samples")
-    logger.info(f"Date range: {test_metadata['date'].min()} to {test_metadata['date'].max()}")
-    
-    # 5. Predict
+
+    # 5. Prepare features
+    X_test, metadata = prepare_features(pred_df)
+
+    # 6. Predict
     logger.info("\n🔮 Generating predictions...")
     y_pred_proba = model.predict_proba(X_test)[:, 1]
     y_pred = (y_pred_proba > 0.5).astype(int)
-    
-    # 6. Save
-    test_metadata = test_metadata.copy()
-    test_metadata['pred_proba'] = y_pred_proba
-    test_metadata['prediction'] = y_pred
-    test_metadata.columns = ['ticker', 'date', 'target', 'future_return', 'pred_proba', 'prediction']
-    test_metadata.to_csv('test_predictions.csv', index=False)
-    
-    logger.info(f"\n💾 Saved test_predictions.csv")
-    logger.info(f"   Total predictions: {len(test_metadata):,}")
+
+    # 7. Save results
+    metadata = metadata.copy()
+    metadata['pred_proba'] = y_pred_proba
+    metadata['prediction'] = y_pred
+
+    metadata.columns = [
+        'ticker', 'date', 'target', 'future_return',
+        'pred_proba', 'prediction'
+    ]
+
+    metadata.to_csv('future_predictions.csv', index=False)
+
+    logger.info(f"\n💾 Saved future_predictions.csv")
+    logger.info(f"   Total predictions: {len(metadata):,}")
     logger.info(f"   Buy signals: {y_pred.sum():,} ({y_pred.mean():.1%})")
-    
+
     logger.info("\n" + "="*60)
-    logger.info("✅ DONE! Now run: python position_sizing_analysis.py")
+    logger.info("✅ DONE! Predictions generated for the FUTURE window.")
     logger.info("="*60)
 
 
