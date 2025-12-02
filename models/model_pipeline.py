@@ -78,26 +78,14 @@ def prepare_features(df: pd.DataFrame):
 
 
 def split_data_by_time(df: pd.DataFrame, train_end_date: str, test_start_date: str):
-    """
-    Split data temporally - critical for time series!
-    Never train on future data.
-    
-    Args:
-        df: Full dataset with 'date' column
-        train_end_date: Last date to include in training (e.g., '2023-12-31')
-        test_start_date: First date to include in testing (e.g., '2024-01-01')
-    
-    Returns:
-        X_train, X_test, y_train, y_test, test_metadata
-    """
     train_end = pd.to_datetime(train_end_date).date()
     test_start = pd.to_datetime(test_start_date).date()
     
     train_df = df[df['date'] <= train_end].copy()
     test_df = df[df['date'] >= test_start].copy()
     
-    logger.info(f"\n📅 Train period: {train_df['date'].min()} to {train_df['date'].max()}")
-    logger.info(f"📅 Test period: {test_df['date'].min()} to {test_df['date'].max()}")
+    logger.info(f"\n Train period: {train_df['date'].min()} to {train_df['date'].max()}")
+    logger.info(f"Test period: {test_df['date'].min()} to {test_df['date'].max()}")
     logger.info(f"Train samples: {len(train_df)} | Test samples: {len(test_df)}")
     
     X_train, y_train, _ = prepare_features(train_df)
@@ -162,9 +150,9 @@ def train_xgboost_randomized_search(X_train, y_train, X_test, y_test, n_iter=30)
     
     search.fit(X_train, y_train)
     
-    logger.info(f"\n✅ Search complete!")
-    logger.info(f"🏆 Best CV ROC-AUC: {search.best_score_:.4f}")
-    logger.info(f"🏆 Best parameters:")
+    logger.info(f"\nSearch complete!")
+    logger.info(f"Best CV ROC-AUC: {search.best_score_:.4f}")
+    logger.info(f"Best parameters:")
     for param, value in search.best_params_.items():
         logger.info(f"   {param}: {value}")
     
@@ -172,7 +160,7 @@ def train_xgboost_randomized_search(X_train, y_train, X_test, y_test, n_iter=30)
     results_df = pd.DataFrame(search.cv_results_)
     results_df = results_df.sort_values('rank_test_score')
     
-    logger.info(f"\n📊 Top 5 parameter combinations:")
+    logger.info(f"\n Top 5 parameter combinations:")
     for idx in range(min(5, len(results_df))):
         row = results_df.iloc[idx]
         logger.info(f"   Rank {idx+1}: CV Score = {row['mean_test_score']:.4f} (±{row['std_test_score']:.4f})")
@@ -371,7 +359,7 @@ def save_model(model, filepath='models/stock_classifier.json'):
     """
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     model.save_model(filepath)
-    logger.info(f"\n💾 Model saved to {filepath}")
+    logger.info(f"\nModel saved to {filepath}")
 
 
 def main():
@@ -379,24 +367,24 @@ def main():
     Full training pipeline with RandomizedSearchCV optimization.
     """
     logger.info("="*60)
-    logger.info("🎯 STOCK CLASSIFIER TRAINING PIPELINE - OPTIMIZED")
+    logger.info(" STOCK CLASSIFIER TRAINING PIPELINE - OPTIMIZED")
     logger.info("="*60)
     
     # 1. Load data
-    logger.info("\n📥 Loading data from database...")
+    logger.info("\nLoading data from database...")
     df = pd.read_sql("SELECT * FROM prices ORDER BY symbol, date", engine)
     logger.info(f"Loaded {len(df)} rows, {len(df.columns)} columns")
     
     # 2. Create target variable
-    logger.info("\n🎯 Creating target variable...")
+    logger.info("\nCreating target variable...")
     df = create_binary_target(df, threshold=0.03, days_ahead=7)
     
     # 3. Train/test split (time-based)
-    logger.info("\n✂️ Splitting data...")
+    logger.info("\n Splitting data...")
     X_train, X_test, y_train, y_test, test_metadata = split_data_by_time(
         df,
-        train_end_date='2023-06-30',  # Train on data through mid-2024
-        test_start_date='2023-07-01'  # Test on recent data
+        train_end_date='2024-12-25',  # Train on data through mid-2023
+        test_start_date='2024-12-26'  # Test on recent data
     )
     
     # 4. Train model with RandomizedSearchCV

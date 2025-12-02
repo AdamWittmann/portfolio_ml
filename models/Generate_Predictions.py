@@ -79,8 +79,8 @@ def main():
     logger.info("\n✂️ Splitting data...")
     X_train, X_test, y_train, y_test, test_metadata = split_data_by_time(
         df,
-        train_end_date='2023-06-30',
-        test_start_date='2023-07-01'
+        train_end_date='2024-12-25',
+        test_start_date='2024-12-26'
     )
     
     logger.info(f"Test set: {len(X_test):,} samples")

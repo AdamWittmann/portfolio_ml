@@ -332,16 +332,6 @@ with tab3:
     fig.update_layout(height=500)
     st.plotly_chart(fig, use_container_width=True)
 
-# Download full report
-st.subheader("💾 Export Full Report")
-
-csv = results_df.to_csv(index=False)
-st.download_button(
-    label="📥 Download CSV Report",
-    data=csv,
-    file_name=f"stock_forecast_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-    mime="text/csv"
-)
 
 # Interpretation guide
 with st.expander("ℹ️ How to Interpret This Dashboard"):
