@@ -29,9 +29,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # your 6650M (adjust 0 or 1)
 
-import torch
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print(f"Using: {torch.cuda.get_device_name(0)}")
+#Uncomment below to train on personal gpus (AMD)
+# import torch
+# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# print(f"Using: {torch.cuda.get_device_name(0)}")
 
 engine = create_engine(os.getenv("DATABASE_URL"))
 
