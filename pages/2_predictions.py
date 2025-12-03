@@ -8,6 +8,10 @@ import yfinance as yf
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+MODEL_PATH = REPO_ROOT / 'models' / 'stock_classifier.json'
 
 st.set_page_config(page_title="Stock Predictions", page_icon="", layout="wide")
 
@@ -21,7 +25,7 @@ def load_model():
     """Load trained XGBoost model"""
     try:
         model = xgb.XGBClassifier()
-        model.load_model('models/stock_classifier.json')
+        model.load_model(str(MODEL_PATH))
         return model
     except FileNotFoundError:
         return None
@@ -29,7 +33,7 @@ def load_model():
 model = load_model()
 
 if model is None:
-    st.error("❌ Model not found! Please run `model_pipeline.py` first to train the model.")
+    st.error(f"❌ Model not found at {MODEL_PATH}! Please run `model_pipeline.py` first to train the model.")
     st.stop()
 else:
     st.success("✅ Model loaded successfully")
