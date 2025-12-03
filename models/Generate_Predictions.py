@@ -7,10 +7,15 @@ from sqlalchemy import create_engine
 import os
 from dotenv import load_dotenv
 import logging
+from pathlib import Path
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+MODEL_PATH = PROJECT_ROOT / 'models' / 'stock_classifier.json'
+PREDICTIONS_PATH = PROJECT_ROOT / 'artifacts' / 'predictions' / 'test_predictions.csv'
 
 engine = create_engine(os.getenv("DATABASE_URL"))
 
@@ -60,8 +65,8 @@ def main():
     logger.info("\n📥 Loading model...")
     try:
         model = xgb.XGBClassifier()
-        model.load_model('models/stock_classifier.json')
-        logger.info("✅ Loaded models/stock_classifier.json")
+        model.load_model(str(MODEL_PATH))
+        logger.info(f"✅ Loaded {MODEL_PATH}")
     except FileNotFoundError:
         logger.error("❌ Model not found! Run model_pipeline.py first.")
         return
@@ -96,9 +101,10 @@ def main():
     test_metadata['pred_proba'] = y_pred_proba
     test_metadata['prediction'] = y_pred
     test_metadata.columns = ['ticker', 'date', 'target', 'future_return', 'pred_proba', 'prediction']
-    test_metadata.to_csv('test_predictions.csv', index=False)
-    
-    logger.info(f"\n💾 Saved test_predictions.csv")
+    PREDICTIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    test_metadata.to_csv(PREDICTIONS_PATH, index=False)
+
+    logger.info(f"\n💾 Saved {PREDICTIONS_PATH}")
     logger.info(f"   Total predictions: {len(test_metadata):,}")
     logger.info(f"   Buy signals: {y_pred.sum():,} ({y_pred.mean():.1%})")
     

@@ -8,10 +8,15 @@ import pandas as pd
 import numpy as np
 import xgboost as xgb
 import logging
+from pathlib import Path
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PREDICTIONS_PATH = PROJECT_ROOT / 'artifacts' / 'predictions' / 'test_predictions.csv'
+SIZED_PORTFOLIO_PATH = PROJECT_ROOT / 'artifacts' / 'predictions' / 'portfolio_results_with_sizing.csv'
 
 
 def train_position_sizing_model(signals_df):
@@ -214,9 +219,9 @@ def main():
     # Load saved predictions
     logger.info("\n📥 Loading saved predictions...")
     try:
-        test_results = pd.read_csv('test_predictions.csv')
+        test_results = pd.read_csv(PREDICTIONS_PATH)
     except FileNotFoundError:
-        logger.error("\n❌ ERROR: test_predictions.csv not found!")
+        logger.error(f"\n❌ ERROR: {PREDICTIONS_PATH} not found!")
         logger.error("   Please run model_pipeline.py first to generate predictions.")
         return
     
@@ -244,8 +249,9 @@ def main():
     compare_strategies(signals, portfolio_results, portfolio_value=20000)
     
     # Save results
-    portfolio_results.to_csv('portfolio_results_with_sizing.csv', index=False)
-    logger.info(f"\n💾 Saved portfolio_results_with_sizing.csv")
+    SIZED_PORTFOLIO_PATH.parent.mkdir(parents=True, exist_ok=True)
+    portfolio_results.to_csv(SIZED_PORTFOLIO_PATH, index=False)
+    logger.info(f"\n💾 Saved {SIZED_PORTFOLIO_PATH}")
     
     logger.info("\n" + "="*60)
     logger.info("✅ POSITION SIZING ANALYSIS COMPLETE!")

@@ -1,13 +1,18 @@
 #gitignore
 .env
-src/__pycache__/
 .env.local
 .venv
 venv/
+
+# Tests
 src/test/
+
+# Caches and logs
+__pycache__/
+*.pyc
+src/__pycache__/
 data_cache/
 data/
 src/db/data_cache/
 src/db/data_loader.log
-data_cache
 data_loader.log

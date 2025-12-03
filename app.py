@@ -15,9 +15,9 @@ st.set_page_config(
 )
 
 # Get absolute paths using hardcoded path
-PROJECT_ROOT = Path('')
-METRICS_PATH = PROJECT_ROOT / 'model_metrics.csv'
-TRADING_METRICS_PATH = PROJECT_ROOT / 'trading_metrics.csv'
+PROJECT_ROOT = Path(__file__).resolve().parent
+METRICS_PATH = PROJECT_ROOT / 'artifacts' / 'metrics' / 'model_metrics.csv'
+TRADING_METRICS_PATH = PROJECT_ROOT / 'artifacts' / 'metrics' / 'trading_metrics.csv'
 PIPELINE_PATH = PROJECT_ROOT / 'models' / 'model_pipeline.py'
 GENERATE_METRICS_PATH = PROJECT_ROOT / 'models' / 'generate_metrics.py'
 
