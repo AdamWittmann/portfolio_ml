@@ -1,6 +1,16 @@
 Portfolio ML Analyzer
 
-A Python/Streamlit project for analyzing stock performance, generating technical indicators, and preparing data for future ML models.
+Welcome to the walkthrough for my professor! This repository contains the code, notebooks, and trained artifacts for my machine-learning-driven portfolio dashboard.
+
+🔗 Live demo: https://freebee.streamlit.app/
+
+What to look at first:
+- Notebooks: end-to-end experimentation in `notebooks/` (data cleaning, feature engineering, model evaluation).
+- Models: saved inference artifacts in `models/` (used directly by the app).
+- App entry point: `app.py` and Streamlit `pages/` for the UI.
+
+⚠️ Note on training: the full retraining pipeline expects a local PostgreSQL database that is not hosted for this submission, so running fresh training end to end will fail. The saved model artifacts still load for prediction using the cached CSV data shipped in `data_cache/`.
+
 Users can either:
 
 Run ONLY the Streamlit dashboard UI using the provided CSVs
@@ -15,6 +25,11 @@ Jump to UI-Only Setup
 👉 To run the FULL pipeline (PostgreSQL + ingestion + CSV generation):
 
 Jump to Full Pipeline With PostgreSQL
+
+🧭 Guided tour for grading
+- Open the notebooks in `notebooks/` to review the experiments.
+- Inspect `models/` for the exported estimator files used in the app.
+- Launch the Streamlit app (UI-only setup) to verify predictions load from the saved model and cached data.
 
 🎨 UI-Only Setup (No Database Required)
 
