@@ -15,7 +15,7 @@ st.set_page_config(
 )
 
 # Hardcoded project root (your machine)
-PROJECT_ROOT = Path("/home/Adam/Projects/MachineLearning/portfolio_ml")
+PROJECT_ROOT = Path("")
 METRICS_PATH = PROJECT_ROOT / "model_metrics.csv"
 TRADING_METRICS_PATH = PROJECT_ROOT / "trading_metrics.csv"
 PIPELINE_PATH = PROJECT_ROOT / "models" / "model_pipeline.py"
