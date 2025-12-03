@@ -14,12 +14,13 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Get absolute paths using hardcoded path
-PROJECT_ROOT = Path('')
-METRICS_PATH = PROJECT_ROOT / 'model_metrics.csv'
-TRADING_METRICS_PATH = PROJECT_ROOT / 'trading_metrics.csv'
-PIPELINE_PATH = PROJECT_ROOT / 'models' / 'model_pipeline.py'
-GENERATE_METRICS_PATH = PROJECT_ROOT / 'models' / 'generate_metrics.py'
+# Resolve important project paths relative to the repo root
+APP_DIR = Path(__file__).resolve().parent
+REPO_ROOT = APP_DIR.parent
+METRICS_PATH = REPO_ROOT / 'artifacts' / 'metrics' / 'model_metrics.csv'
+TRADING_METRICS_PATH = REPO_ROOT / 'artifacts' / 'metrics' / 'trading_metrics.csv'
+PIPELINE_PATH = REPO_ROOT / 'models' / 'model_pipeline.py'
+GENERATE_METRICS_PATH = REPO_ROOT / 'models' / 'generate_metrics.py'
 
 # ---------- Load Model Metrics ----------
 @st.cache_data
@@ -91,7 +92,7 @@ def run_model_pipeline():
             capture_output=True,
             text=True,
             timeout=600,  # 10 minute timeout
-            cwd=str(PROJECT_ROOT)  # Run from project root
+            cwd=str(REPO_ROOT)  # Run from project root
         )
         
         if result.returncode == 0:
@@ -162,7 +163,7 @@ with st.sidebar:
                         capture_output=True,
                         text=True,
                         timeout=60,
-                        cwd=str(PROJECT_ROOT)
+                        cwd=str(REPO_ROOT)
                     )
                     
                 st.session_state.metrics_in_progress = False
@@ -227,7 +228,7 @@ with st.sidebar:
     
     # Debug info (collapsible)
     with st.expander("Debug Info"):
-        st.text(f"Project Root: {PROJECT_ROOT}")
+        st.text(f"Repo Root: {REPO_ROOT}")
         st.text(f"Pipeline: {PIPELINE_PATH.exists()}")
         st.text(f"Generate Script: {GENERATE_METRICS_PATH.exists()}")
         st.text(f"Metrics CSV: {METRICS_PATH.exists()}")

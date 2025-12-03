@@ -3,11 +3,17 @@ import os
 import pandas as pd
 import datetime as dt
 import logging
+from pathlib import Path
 from dotenv import load_dotenv
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+LOG_DIR = REPO_ROOT / 'artifacts' / 'logs'
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+LOG_FILE = LOG_DIR / 'data_loader.log'
 
 load_dotenv()
 logging.basicConfig(
-    filename='data_loader.log',
+    filename=str(LOG_FILE),
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
