@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 import logging
 from xgboost import XGBClassifier
 from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score, 
+    accuracy_score, precision_score, recall_score,
     f1_score, roc_auc_score
 )
 
@@ -17,11 +17,11 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# FIXED ABSOLUTE PATHS
-PROJECT_ROOT = Path('/home/Adam/Projects/MachineLearning/portfolio_ml')
+# Paths relative to repository root
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MODEL_PATH = PROJECT_ROOT / 'models' / 'stock_classifier.json'
-METRICS_PATH = PROJECT_ROOT / 'model_metrics.csv'
-TRADING_METRICS_PATH = PROJECT_ROOT / 'trading_metrics.csv'
+METRICS_PATH = PROJECT_ROOT / 'artifacts' / 'metrics' / 'model_metrics.csv'
+TRADING_METRICS_PATH = PROJECT_ROOT / 'artifacts' / 'metrics' / 'trading_metrics.csv'
 
 engine = create_engine(os.getenv("DATABASE_URL"))
 
@@ -142,6 +142,9 @@ def main():
     model.load_model(str(MODEL_PATH))
     logger.info("✅ Model loaded successfully")
     sys.stdout.flush()
+
+    METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    TRADING_METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
     
     # Load data
     logger.info("\n📥 Loading data from database...")

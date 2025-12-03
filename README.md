@@ -2,6 +2,7 @@ Portfolio ML Analyzer
 
 Welcome to the walkthrough for my professor! This repository contains the code, notebooks, and trained artifacts for my machine-learning-driven portfolio dashboard.
 
+
 🔗 Live demo1: https://freebee.streamlit.app/ (Look-Forward Validation model)
 
 🔗 Live demo2: https://freemoney.streamlit.app/predictions (82/18)
@@ -10,6 +11,8 @@ What to look at first:
 - Notebooks: end-to-end experimentation in `notebooks/` (data cleaning, feature engineering, model evaluation).
 - Models: saved inference artifacts in `models/` (used directly by the app).
 - App entry point: `app.py` and Streamlit `pages/` for the UI.
+- Reports: generated CSV metrics in `artifacts/metrics/`, prediction outputs in `artifacts/predictions/`, and figures in `artifacts/figures/` for quick grading reference.
+
 
 ⚠️ Note on training: the full retraining pipeline expects a local PostgreSQL database that is not hosted for this submission, so running fresh training end to end will fail. The saved model artifacts still load for prediction using the cached CSV data shipped in `data_cache/`.
 
@@ -76,10 +79,7 @@ data_cache/
 The repo already includes these.
 
 5. Run the Streamlit Dashboard
-streamlit run streamlit_app.py
-
-
-(Replace streamlit_app.py with your actual filename.)
+streamlit run app.py
 
 Dashboard will launch automatically at:
 

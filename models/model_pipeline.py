@@ -8,18 +8,22 @@ from dotenv import load_dotenv
 import logging
 from xgboost import XGBClassifier
 from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score, 
+    accuracy_score, precision_score, recall_score,
     f1_score, roc_auc_score, confusion_matrix, classification_report
 )
 from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit, GridSearchCV
 from scipy.stats import randint, uniform
 import matplotlib.pyplot as plt
 import seaborn as sns
+from pathlib import Path
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # your 6650M (adjust 0 or 1)
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+FIGURES_DIR = PROJECT_ROOT / 'artifacts' / 'figures'
 
 #Uncomment for personal gpu training:)
 # import torch
@@ -287,7 +291,8 @@ def evaluate_model(model, X_test, y_test):
     logger.info(f"Actual: Yes   |    {cm[1,0]:6d}     |    {cm[1,1]:6d}")
     
     # Classification report
-    logger.info(f"\n{classification_report(y_test, y_pred, target_names=["Don't Buy", 'Buy'])}")
+    target_names = ["Don't Buy", 'Buy']
+    logger.info(f"\n{classification_report(y_test, y_pred, target_names=target_names)}")
     
     return metrics, y_pred, y_pred_proba
 
@@ -331,10 +336,13 @@ def evaluate_trading_performance(test_metadata, y_pred_proba, threshold=0.5):
     }
 
 
-def plot_feature_importance(model, feature_names, top_n=15, save_path='feature_importance.png'):
+def plot_feature_importance(model, feature_names, top_n=15, save_path=None):
     """
     Visualize which features matter most.
     """
+    if save_path is None:
+        save_path = FIGURES_DIR / 'feature_importance.png'
+
     importance_df = pd.DataFrame({
         'feature': feature_names,
         'importance': model.feature_importances_
@@ -347,6 +355,7 @@ def plot_feature_importance(model, feature_names, top_n=15, save_path='feature_i
     plt.title(f'Top {top_n} Most Important Features')
     plt.gca().invert_yaxis()
     plt.tight_layout()
+    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     logger.info(f"\n📈 Feature importance plot saved to {save_path}")
     plt.close()
