@@ -2,7 +2,8 @@ Portfolio ML Analyzer
 
 Welcome to the walkthrough for my professor! This repository contains the code, notebooks, and trained artifacts for my machine-learning-driven portfolio dashboard.
 
-🔗 Live demo: https://freebee.streamlit.app/
+🔗 Live demo1: https://freebee.streamlit.app/ (Look-Forward Validation model)
+🔗 Live demo2: https://freemoney.streamlit.app/predictions (82/18)
 
 What to look at first:
 - Notebooks: end-to-end experimentation in `notebooks/` (data cleaning, feature engineering, model evaluation).
