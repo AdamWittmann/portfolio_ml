@@ -12,7 +12,5 @@ src/db/data_loader.log
 data_cache
 *.log
 notebooks/
-*.csv
-*.txt
 *.sh
 *.png
